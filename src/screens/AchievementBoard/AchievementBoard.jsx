@@ -48,7 +48,7 @@ export default function AchievementBoard() {
         title: form.title, description: form.description,
         category: form.category, imageURL,
         externalLink: form.externalLink || null,
-        likes: [], pinned: false, approved: !isHod,
+        likes: [], pinned: false, approved: isHod,
       });
       toast.success(isHod ? 'Achievement posted! 🎉' : 'Achievement submitted for approval');
       setShowForm(false);

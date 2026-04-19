@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
-import { where, orderBy, limit } from 'firebase/firestore';
-import { serverTimestamp } from 'firebase/firestore';
+import { where, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 
 export default function Results() {

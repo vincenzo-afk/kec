@@ -22,11 +22,8 @@ exports.syncNotificationTopics = onCall(async (request) => {
     topics.push(`dept_${user.department}`);
   }
 
-  if (topics.length) {
-    await messaging.subscribeToTopic([token], topics[0]);
-    for (let i = 1; i < topics.length; i++) {
-      await messaging.subscribeToTopic([token], topics[i]);
-    }
+  for (const topic of topics) {
+    await messaging.subscribeToTopic([token], topic);
   }
 
   return { success: true, topics };

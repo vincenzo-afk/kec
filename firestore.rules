@@ -171,5 +171,11 @@ service cloud.firestore {
       allow read: if isPrincipal();
       allow write: if false; // Cloud Functions only
     }
+
+    // ── Feedback (Anonymous) ──────────────────────────────────────
+    match /feedback/{feedbackId} {
+      allow read, update: if isHod();
+      allow create, delete: if false; // Submit handled by Cloud Functions
+    }
   }
 }

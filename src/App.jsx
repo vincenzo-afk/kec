@@ -27,6 +27,10 @@ import Settings from './screens/Settings/Settings';
 import AdminPanel from './screens/AdminPanel/AdminPanel';
 import NotesUpload from './screens/NotesUpload/NotesUpload';
 
+// Feedback
+import FeedbackSubmit from './screens/Feedback/FeedbackSubmit';
+import FeedbackDashboard from './screens/Feedback/FeedbackDashboard';
+
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <FullscreenSpinner />;
@@ -109,6 +113,11 @@ export default function App() {
         <Route path="notes" element={<NotesUpload />} />
         <Route path="settings" element={<Settings />} />
         <Route path="settings/:section" element={<Settings />} />
+        
+        {/* Feedback Routes */}
+        <Route path="feedback" element={<FeedbackSubmit />} />
+        <Route path="feedback-dashboard" element={<FeedbackDashboard />} />
+
         <Route path="admin" element={
           <RequireAdmin>
             <AdminPanel />

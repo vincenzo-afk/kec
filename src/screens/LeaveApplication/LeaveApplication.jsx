@@ -136,10 +136,24 @@ function StudentLeavePanel({ profile }) {
 }
 
 function TeacherLeavePanel({ profile, isHod }) {
-  const { subscribe, updateDocument } = useFirestore();
+  const { subscribe, updateDocument, fetchCollection } = useFirestore();
   const [leaves, setLeaves] = useState([]);
+  const [students, setStudents] = useState({});  // id -> name map
   const [reviewNote, setReviewNote] = useState({});
   const [processing, setProcessing] = useState({});
+
+  // Preload student names for this class
+  useEffect(() => {
+    if (!profile) return;
+    fetchCollection('users', [
+      where('role', '==', 'student'),
+      where('department', '==', profile.department),
+    ]).then(list => {
+      const map = {};
+      list.forEach(u => { map[u.id] = u.name || u.email || u.id.slice(0, 8); });
+      setStudents(map);
+    }).catch(() => {});
+  }, [profile, fetchCollection]);
 
   useEffect(() => {
     if (!profile) return;
@@ -178,7 +192,7 @@ function TeacherLeavePanel({ profile, isHod }) {
           {pending.map(l => (
             <div key={l.id} className="card" style={{ marginBottom: 'var(--space-3)', padding: 'var(--space-4)' }}>
               <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
-                <span className="font-semibold text-sm">{l.studentId?.slice(0, 8)}</span>
+                <span className="font-semibold text-sm">{students[l.studentId] || l.studentId?.slice(0, 8)}</span>
                 <span className="badge badge-grey" style={{ textTransform: 'capitalize' }}>{l.type} · {l.daysCount}d</span>
               </div>
               <p className="text-xs text-muted" style={{ marginBottom: 4 }}>{l.fromDate} → {l.toDate}</p>

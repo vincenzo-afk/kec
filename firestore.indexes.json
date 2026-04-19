@@ -51,6 +51,14 @@
       "collectionGroup": "leaveApplications",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "classId", "order": "ASCENDING" },
+        { "fieldPath": "appliedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leaveApplications",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "teacherId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
@@ -80,7 +88,7 @@
     },
     {
       "collectionGroup": "messages",
-      "queryScope": "COLLECTION",
+      "queryScope": "COLLECTION_GROUP",
       "fields": [
         { "fieldPath": "receiverId", "order": "ASCENDING" },
         { "fieldPath": "read", "order": "ASCENDING" }

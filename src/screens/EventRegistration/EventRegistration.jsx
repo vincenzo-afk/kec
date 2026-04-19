@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
-import { orderBy, limit, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { orderBy, limit, arrayUnion, arrayRemove, serverTimestamp } from 'firebase/firestore';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatDistanceToNow, isPast, parseISO } from 'date-fns';
@@ -77,7 +77,7 @@ export default function EventRegistration() {
           status: 'pending', daysCount: 1,
           reviewedAt: null, reviewedBy: null, reviewNote: null,
           attachmentURL: null, autoReflected: false,
-          appliedAt: new Date()
+          appliedAt: serverTimestamp()
         });
         toast.success(`Registered! Auto-drafted leave for ${event.date} 📋`);
       } else {
@@ -130,7 +130,7 @@ export default function EventRegistration() {
     }));
     if (!rows.length) return toast.error('No registrations');
     const headers = Object.keys(rows[0]);
-    const csv = [headers.join(','), ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','))].join('\\n');
+    const csv = [headers.join(','), ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

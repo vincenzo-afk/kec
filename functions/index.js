@@ -31,3 +31,6 @@ exports.testReminder        = require('./calendar/testReminder').testReminder;
 
 // ── Reports ─────────────────────────────────────────────────────────
 exports.exportLeaveReport = require('./reports/exportLeaveReport').exportLeaveReport;
+
+// ── Feedback ────────────────────────────────────────────────────────
+exports.submitAnonymousFeedback = require('./feedback/submitAnonymousFeedback').submitAnonymousFeedback;

@@ -105,7 +105,7 @@ export default function StudyGPT() {
           <div style={{ fontSize: 28 }}>🤖</div>
           <div>
             <div className="font-semibold">StudyGPT</div>
-            <div className="text-xs text-muted">Powered by Gemini 1.5 Flash</div>
+            <div className="text-xs text-muted">Powered by Gemini 2.5 Flash</div>
           </div>
         </div>
         <div className="flex items-center gap-2">

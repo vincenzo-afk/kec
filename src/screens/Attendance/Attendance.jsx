@@ -146,7 +146,7 @@ function TeacherAttendance({ profile }) {
   };
 
   return (
-    <div className="page animate-fade">
+    <>
       <div className="page-header"><h2>Mark Attendance</h2></div>
       <div className="card" style={{ marginBottom:'var(--space-5)', display:'flex', flexDirection:'column', gap:'var(--space-4)' }}>
         <div className="form-group"><label className="form-label">Date</label><input className="form-input" type="date" value={date} onChange={e => setDate(e.target.value)} max={format(new Date(), 'yyyy-MM-dd')} /></div>
@@ -171,7 +171,7 @@ function TeacherAttendance({ profile }) {
         ))}
       </div>
       <button className="btn btn-primary btn-full btn-lg" style={{ marginTop:'var(--space-5)' }} onClick={submit} disabled={submitting || !canMarkDate(date)}>{submitting ? 'Saving…' : 'Submit Attendance'}</button>
-    </div>
+    </>
   );
 }
 
@@ -213,7 +213,7 @@ function AttendanceOverview({ profile, isPrincipal }) {
   };
 
   return (
-    <div className="page animate-fade">
+    <>
       <div className="page-header">
         <h2>{isPrincipal ? 'College Attendance Overview' : 'Department Attendance Overview'}</h2>
         <button className="btn btn-primary btn-sm" onClick={exportPdf}>Download PDF</button>
@@ -226,7 +226,7 @@ function AttendanceOverview({ profile, isPrincipal }) {
           </tbody>
         </table>
       </div>
-    </div>
+    </>
   );
 }
 

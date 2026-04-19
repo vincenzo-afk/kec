@@ -29,12 +29,13 @@ const navGroups = [
       { to: '/achievements', icon: '🌟', label: 'Achievements' },
       { to: '/events', icon: '🎪', label: 'Events' },
       { to: '/leave', icon: '📋', label: 'Leave' },
+      { to: '/feedback', icon: '💭', label: 'Anonymous Feedback' },
     ],
   },
 ];
 
 export default function Sidebar() {
-  const { profile, logout, isPrincipal } = useAuth();
+  const { profile, logout, isPrincipal, isHod } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -81,12 +82,18 @@ export default function Sidebar() {
           </div>
         ))}
 
-        {isPrincipal && (
+        {isHod && (
           <div className="sidebar-group">
-            {!collapsed && <div className="sidebar-group-label">Admin</div>}
-            <NavLink to="/admin" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`} title={collapsed ? 'Admin Panel' : undefined}>
-              <span className="sidebar-item-icon">🛡️</span>
-              {!collapsed && <span className="sidebar-item-label">Admin Panel</span>}
+            {!collapsed && <div className="sidebar-group-label">Management</div>}
+            {isPrincipal && (
+              <NavLink to="/admin" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`} title={collapsed ? 'Admin Panel' : undefined}>
+                <span className="sidebar-item-icon">🛡️</span>
+                {!collapsed && <span className="sidebar-item-label">Admin Panel</span>}
+              </NavLink>
+            )}
+            <NavLink to="/feedback-dashboard" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`} title={collapsed ? 'Feedback Dashboard' : undefined}>
+              <span className="sidebar-item-icon">📊</span>
+              {!collapsed && <span className="sidebar-item-label">Feedback Dashboard</span>}
             </NavLink>
           </div>
         )}

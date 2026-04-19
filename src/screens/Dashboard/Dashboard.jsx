@@ -23,12 +23,20 @@ export default function Dashboard() {
     return subscribe('announcements', [orderBy('timestamp', 'desc'), limit(3)], setAnnouncements);
   }, [profile, subscribe]);
 
-  // Fetch leave status (students and teachers)
+  // Fetch leave status
   useEffect(() => {
     if (!profile) return;
     if (isTeacher) {
       if (!isHod && !isPrincipal) {
+        // Regular teacher: see their own class's pending leaves
         return subscribe('leaveApplications', [where('teacherId', '==', profile.id), where('status', '==', 'pending')], setLeaves);
+      } else {
+        // HOD / Principal: show pending leaves for their department class
+        return subscribe('leaveApplications', [
+          where('classId', '==', `${profile.department}-${profile.year}-${profile.section}`),
+          where('status', '==', 'pending'),
+          limit(50),
+        ], setLeaves);
       }
     } else {
       return subscribe('leaveApplications', [where('studentId', '==', profile.id), orderBy('appliedAt', 'desc'), limit(3)], setLeaves);
@@ -383,8 +391,11 @@ function quickLinks(role) {
     { to: '/announcements', icon: '📢', label: 'Announce' },
     { to: '/leave', icon: '📋', label: 'Leave' },
     { to: '/achievements', icon: '🌟', label: 'Achieve' },
-    { to: '/events', icon: '🎪', label: 'Events' },
+    { to: '/feedback', icon: '💭', label: 'Feedback' },
   ];
-  if (['hod','principal'].includes(role)) all.push({ to: '/admin', icon: '🛡️', label: 'Admin' });
-  return all.slice(0, 8);
+  if (['hod','principal'].includes(role)) {
+    all.push({ to: '/feedback-dashboard', icon: '📊', label: 'Feedback Dash' });
+    all.push({ to: '/admin', icon: '🛡️', label: 'Admin' });
+  }
+  return all.slice(0, 10);
 }

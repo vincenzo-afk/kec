@@ -60,10 +60,29 @@ export default function EventRegistration() {
     const isRegistered = event.registrations?.includes(profile.id);
     setRegistering(r => ({ ...r, [event.id]: true }));
     try {
+      const isJoining = !isRegistered;
       await updateDoc(doc(db, 'events', event.id), {
-        registrations: isRegistered ? arrayRemove(profile.id) : arrayUnion(profile.id),
+        registrations: isJoining ? arrayUnion(profile.id) : arrayRemove(profile.id),
       });
-      toast.success(isRegistered ? 'Registration cancelled' : 'Registered! 🎉');
+      
+      // Auto-draft leave application if joining
+      if (isJoining && profile.role === 'student') {
+        await addDocument('leaveApplications', {
+          studentId: profile.id,
+          teacherId: '', // Will be picked up by their section teacher
+          classId: `${profile.department}-${profile.year}-${profile.section}`,
+          fromDate: event.date, toDate: event.date,
+          reason: `Automatic leave for event: ${event.title}`, 
+          type: 'event',
+          status: 'pending', daysCount: 1,
+          reviewedAt: null, reviewedBy: null, reviewNote: null,
+          attachmentURL: null, autoReflected: false,
+          appliedAt: new Date()
+        });
+        toast.success(`Registered! Auto-drafted leave for ${event.date} 📋`);
+      } else {
+        toast.success(isRegistered ? 'Registration cancelled' : 'Registered! 🎉');
+      }
     } catch (e) { toast.error(e.message); }
     finally { setRegistering(r => ({ ...r, [event.id]: false })); }
   };

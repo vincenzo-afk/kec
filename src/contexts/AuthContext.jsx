@@ -91,7 +91,8 @@ export function AuthProvider({ children }) {
 
   // Derived helpers
   const isApproved = profile?.approvalStatus === 'approved';
-  const isPending  = profile?.approvalStatus === 'pending';
+  // If user exists but no profile exists in Firestore, treat as pending
+  const isPending  = !!user && (!profile || profile.approvalStatus === 'pending');
   const role       = profile?.role || 'student';
   const isTeacher  = ['teacher', 'hod', 'principal'].includes(role);
   const isHod      = ['hod', 'principal'].includes(role);

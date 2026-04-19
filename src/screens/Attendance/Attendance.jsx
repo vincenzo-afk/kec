@@ -1,14 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
-import { where, orderBy, limit } from 'firebase/firestore';
+import { where, orderBy, limit, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../../firebase';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, subMonths, addMonths } from 'date-fns';
 import toast from 'react-hot-toast';
 
 export default function Attendance() {
   const { profile, isTeacher, isHod, isPrincipal } = useAuth();
+  const [view, setView] = useState('overview'); // 'overview', 'mark', 'my'
+
   if (!isTeacher) return <StudentAttendance profile={profile} />;
-  if (isHod || isPrincipal) return <AttendanceOverview profile={profile} isPrincipal={isPrincipal} />;
+  
+  if (isHod || isPrincipal) {
+    return (
+      <div className="page animate-fade">
+        <div className="tabs" style={{ marginBottom: 'var(--space-5)' }}>
+          <button className={`tab ${view === 'overview' ? 'active' : ''}`} onClick={() => setView('overview')}>Overview</button>
+          <button className={`tab ${view === 'mark' ? 'active' : ''}`} onClick={() => setView('mark')}>Mark Attendance</button>
+        </div>
+        {view === 'overview' ? <AttendanceOverview profile={profile} isPrincipal={isPrincipal} /> : <TeacherAttendance profile={profile} />}
+      </div>
+    );
+  }
+
   return <TeacherAttendance profile={profile} />;
 }
 
@@ -104,19 +119,23 @@ function TeacherAttendance({ profile }) {
 
   const submit = async () => {
     if (!subject) return toast.error('Select a subject');
-    if (!canMarkDate(date)) return toast.error('Retroactive edits are locked after day close. Mark only today.');
+    if (!canMarkDate(date)) {
+      return toast.error('Retroactive edits are locked after 11:59 PM of the marking date.');
+    }
     setSubmitting(true);
     try {
       for (const student of students) {
-        await addDocument('attendance', {
+        const classId = `${profile.department}-${profile.year || student.year}-${student.section}`;
+        const docId = `${student.id}_${date}_${subject.replace(/\s+/g, '_')}`;
+        await setDoc(doc(db, 'attendance', docId), {
           studentId: student.id,
-          classId: `${profile.department}-${profile.year || student.year}-${student.section}`,
+          classId,
           date,
           subject,
           status: marked[student.id] || 'absent',
           markedBy: profile.id,
-          leaveRef: null,
-        });
+          timestamp: serverTimestamp(),
+        }, { merge: true });
       }
       toast.success('Attendance saved!');
     } catch (e) {

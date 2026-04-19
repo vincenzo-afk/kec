@@ -101,8 +101,9 @@ export default function CalendarScreen() {
             const dayEvents = eventsForDay(day);
             const isSelected = selected && isSameDay(day, selected);
             const isToday = isSameDay(day, new Date());
-            return (
-              <button key={day.toISOString()} onClick={() => setSelected(isSameDay(day, selected||new Date('invalid')) ? null : day)}
+              <button key={day.toISOString()} 
+                onClick={() => setSelected(isSameDay(day, selected||new Date('invalid')) ? null : day)}
+                onContextMenu={(e) => { e.preventDefault(); setSelected(day); setShowAdd(true); }}
                 style={{
                   aspectRatio: '1', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer',
                   background: isSelected ? 'var(--color-primary)' : isToday ? 'var(--color-primary-muted)' : 'transparent',

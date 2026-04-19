@@ -150,7 +150,7 @@ export default function Dashboard() {
       {/* Quick Links Grid */}
       <div style={{ marginBottom: 'var(--space-6)' }}>
         <h3 style={{ marginBottom: 'var(--space-4)', fontSize: 'var(--font-size-md)' }}>Quick Access</h3>
-        <div className="quick-grid">
+        <div className={`quick-grid ${profile?.preferences?.dashboardLayout === 'list' ? 'list' : ''}`}>
           {quickLinks(role).map(link => (
             <Link key={link.to} to={link.to} className="quick-link">
               <span className="quick-link-icon">{link.icon}</span>
@@ -249,12 +249,18 @@ export default function Dashboard() {
         .stat-icon { width: 40px; height: 40px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
         .stat-value { font-size: var(--font-size-xl); font-weight: 800; color: var(--color-text-primary); line-height: 1; }
         .stat-label { font-size: var(--font-size-xs); color: var(--color-text-muted); margin-top: 2px; }
+        
         .quick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); }
-        @media (max-width: 480px) { .quick-grid { grid-template-columns: repeat(3, 1fr); } .dashboard-stats { grid-template-columns: repeat(2, 1fr); } }
+        .quick-grid.list { grid-template-columns: 1fr; }
+        @media (max-width: 480px) { .quick-grid { grid-template-columns: repeat(3, 1fr); } .quick-grid.list { grid-template-columns: 1fr; } .dashboard-stats { grid-template-columns: repeat(2, 1fr); } .dashboard-stats.list { grid-template-columns: 1fr; } }
+        
         .quick-link { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--space-2); border-radius: var(--radius-lg); background: var(--color-surface); border: 1px solid var(--color-border); text-decoration: none !important; transition: all var(--transition-fast); }
         .quick-link:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); border-color: var(--color-primary); }
+        .quick-grid.list .quick-link { flex-direction: row; padding: var(--space-3) var(--space-4); gap: var(--space-4); }
         .quick-link-icon { font-size: 26px; }
         .quick-link-label { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); text-align: center; }
+        .quick-grid.list .quick-link-label { font-size: 14px; }
+        
         .study-gpt-cta { display: flex; align-items: center; justify-content: space-between; padding: var(--space-5); border-radius: var(--radius-lg); background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); text-decoration: none !important; transition: all var(--transition-fast); box-shadow: var(--shadow-glow); }
         .study-gpt-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(30,58,138,0.35); }
       `}</style>

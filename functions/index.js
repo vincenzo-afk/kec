@@ -25,6 +25,7 @@ exports.onLeaveReview = require('./leave/onLeaveReview').onLeaveReview;
 // ── Achievements & Events ───────────────────────────────────────────
 exports.onNewAchievement   = require('./achievements/onNewAchievement').onNewAchievement;
 exports.onEventRegistration = require('./events/onEventRegistration').onEventRegistration;
+exports.testReminder        = require('./calendar/testReminder').testReminder;
 
 // ── Reports ─────────────────────────────────────────────────────────
 exports.exportLeaveReport = require('./reports/exportLeaveReport').exportLeaveReport;

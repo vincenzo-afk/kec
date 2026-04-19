@@ -82,11 +82,13 @@ export default function StudyGPT() {
   };
 
   const regenerate = () => {
+    if (loading || messages.length < 2) return;
     const lastUserIndex = [...messages].reverse().findIndex(m => m.role === 'user');
     if (lastUserIndex === -1) return;
-    const lastUser = [...messages].reverse()[lastUserIndex];
-    setMessages(m => m.slice(0, m.length - 1 - lastUserIndex)); 
-    doSend(lastUser.content);
+    const realIndex = messages.length - 1 - lastUserIndex;
+    const lastUserQuery = messages[realIndex].content;
+    setMessages(prev => prev.slice(0, realIndex)); 
+    doSend(lastUserQuery);
   };
 
   return (
@@ -103,7 +105,7 @@ export default function StudyGPT() {
           <div style={{ fontSize: 28 }}>🤖</div>
           <div>
             <div className="font-semibold">StudyGPT</div>
-            <div className="text-xs text-muted">Powered by Gemini 2.5 Flash</div>
+            <div className="text-xs text-muted">Powered by Gemini 1.5 Flash</div>
           </div>
         </div>
         <div className="flex items-center gap-2">

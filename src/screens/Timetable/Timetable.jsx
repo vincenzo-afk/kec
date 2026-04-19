@@ -61,6 +61,11 @@ export default function Timetable() {
     }
   };
 
+  useEffect(() => {
+    if (!current?.uploadedBy) return;
+    fetchDoc('users', current.uploadedBy).then((u) => setUploaderName(u?.name || current.uploadedBy)).catch(() => setUploaderName(current.uploadedBy));
+  }, [current?.uploadedBy, fetchDoc]);
+
   return (
     <div className="page animate-fade">
       <div className="page-header">
@@ -146,6 +151,22 @@ export default function Timetable() {
             )}
           </div>
           <p className="text-xs text-muted" style={{ textAlign: 'center', marginTop: 8 }}>Double-tap to reset zoom</p>
+          
+          {timetables.length > 1 && (
+            <div style={{ marginTop: 'var(--space-6)' }}>
+              <h3 style={{ fontSize: 'var(--font-size-md)', marginBottom: 'var(--space-3)' }}>History</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                {timetables.slice(1).map(t => (
+                  <div key={t.id} className="card" style={{ padding: 'var(--space-3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="text-xs text-muted">
+                      {t.validFrom ? `Valid from ${t.validFrom}` : t.id}
+                    </div>
+                    <button className="btn btn-ghost btn-sm" onClick={() => window.open(t.imageURL)}>View</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="empty-state">
@@ -157,7 +178,3 @@ export default function Timetable() {
     </div>
   );
 }
-  useEffect(() => {
-    if (!current?.uploadedBy) return;
-    fetchDoc('users', current.uploadedBy).then((u) => setUploaderName(u?.name || current.uploadedBy)).catch(() => setUploaderName(current.uploadedBy));
-  }, [current?.uploadedBy, fetchDoc]);

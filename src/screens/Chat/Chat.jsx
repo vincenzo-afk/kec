@@ -44,8 +44,20 @@ function P2PTab() {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('users', [where('approvalStatus', '==', 'approved'), limit(200)], data => {
-      setUsers(data.filter(u => u.id !== profile.id));
+    return subscribe('users', [where('approvalStatus', '==', 'approved'), limit(50)], usersData => {
+      const canCross = profile.preferences?.crossDepartmentChat !== false;
+      const filtered = usersData.filter(u => {
+        if (u.id === profile.id) return false;
+        if (!canCross && u.department !== profile.department) return false;
+        return true;
+      });
+      const convs = filtered.map(u => ({
+        chatId: [profile.id, u.id].sort().join('-'),
+        otherUser: u,
+        lastMessage: 'Tap to chat',
+        unread: 0
+      }));
+      setConversations(convs);
     });
   }, [profile, subscribe]);
 

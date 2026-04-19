@@ -1,0 +1,277 @@
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { useFirestore } from '../../hooks/useFirestore';
+import { where, orderBy, limit } from 'firebase/firestore';
+import { serverTimestamp } from 'firebase/firestore';
+import toast from 'react-hot-toast';
+
+export default function Results() {
+  const { profile, isTeacher, isHod } = useAuth();
+  return isTeacher
+    ? <TeacherResults profile={profile} />
+    : <StudentResults profile={profile} />;
+}
+
+/* ────────── Student View ────────── */
+function StudentResults({ profile }) {
+  const { subscribe } = useFirestore();
+  const [results, setResults] = useState([]);
+
+  useEffect(() => {
+    if (!profile) return;
+    return subscribe('results', [
+      where('classId', '==', `${profile.department}-${profile.year}-${profile.section}`),
+      orderBy('createdAt', 'desc'),
+    ], setResults);
+  }, [profile]);
+
+  const bySubject = results.reduce((acc, r) => {
+    const subj = r.subject;
+    if (!acc[subj]) acc[subj] = [];
+    acc[subj].push(r);
+    return acc;
+  }, {});
+
+  return (
+    <div className="page animate-fade">
+      <div className="page-header"><h2>My Results</h2></div>
+
+      {Object.keys(bySubject).length === 0 && (
+        <div className="empty-state"><div className="empty-state-icon">🏆</div><p>No results published yet</p></div>
+      )}
+
+      {Object.entries(bySubject).map(([subject, tests]) => {
+        const avg = Math.round(tests.reduce((s, t) => {
+          const score = t.marksMap?.[profile?.id] ?? 0;
+          return s + (score / t.maxMarks) * 100;
+        }, 0) / tests.length);
+
+        return (
+          <div key={subject} style={{ marginBottom: 'var(--space-6)' }}>
+            <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-3)' }}>
+              <h3 style={{ fontSize: 'var(--font-size-md)' }}>{subject}</h3>
+              <span className="badge badge-blue">Avg {avg}%</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {tests.map(test => {
+                const score = test.marksMap?.[profile?.id] ?? null;
+                const pct = score !== null ? Math.round((score / test.maxMarks) * 100) : null;
+                const grade = pct === null ? '—' : pct >= 90 ? 'A+' : pct >= 80 ? 'A' : pct >= 70 ? 'B' : pct >= 60 ? 'C' : pct >= 50 ? 'D' : 'F';
+                const gradeColor = pct === null ? 'var(--color-text-muted)' : pct >= 60 ? 'var(--color-success)' : 'var(--color-danger)';
+
+                return (
+                  <div key={test.id} className="card" style={{ padding: 'var(--space-4)' }}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-semibold text-sm">{test.testName}</div>
+                        <div className="text-xs text-muted">Max: {test.maxMarks} marks</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 800, color: gradeColor }}>
+                          {score !== null ? score : '—'}<span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)' }}>/{test.maxMarks}</span>
+                        </div>
+                        <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, color: gradeColor }}>{grade}</div>
+                      </div>
+                    </div>
+                    {pct !== null && (
+                      <div style={{ marginTop: 8, height: 6, borderRadius: 'var(--radius-full)', background: 'var(--color-bg-secondary)', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${pct}%`, background: gradeColor, borderRadius: 'var(--radius-full)', transition: 'width 0.6s ease' }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ────────── Teacher View ────────── */
+function TeacherResults({ profile }) {
+  const { addDocument, subscribe, fetchCollection, updateDocument } = useFirestore();
+  const [tests, setTests] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ testName: '', subject: '', maxMarks: '' });
+  const [marks, setMarks] = useState({});
+  const [students, setStudents] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [selectedTest, setSelectedTest] = useState(null);
+
+  useEffect(() => {
+    if (!profile) return;
+    return subscribe('results', [
+      where('teacherId', '==', profile.id),
+      orderBy('createdAt', 'desc'),
+    ], setTests);
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const loadStudents = async () => {
+      try {
+        const list = await fetchCollection('users', [
+          where('role', '==', 'student'),
+          where('department', '==', profile.department),
+          where('year', '==', profile.year),
+          where('section', '==', profile.section)
+        ]);
+        setStudents(list);
+      } catch (err) {}
+    };
+    loadStudents();
+  }, [profile, fetchCollection]);
+
+  const setF = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const submitTest = async (e) => {
+    e.preventDefault();
+    if (!form.testName || !form.subject || !form.maxMarks) return toast.error('Fill all fields');
+    setSaving(true);
+    try {
+      await addDocument('results', {
+        testName: form.testName,
+        subject: form.subject,
+        maxMarks: Number(form.maxMarks),
+        teacherId: profile.id,
+        classId: `${profile.department}-${profile.year}-${profile.section}`,
+        marksMap: marks,
+        lockedBy: null,
+        lockedAt: null,
+      });
+      toast.success('Test results saved!');
+      setShowForm(false);
+      setForm({ testName: '', subject: '', maxMarks: '' });
+      setMarks({});
+    } catch (e) {
+      toast.error('Error: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="page animate-fade">
+      <div className="page-header">
+        <h2>Results</h2>
+        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
+          {showForm ? '✕ Cancel' : '+ New Test'}
+        </button>
+      </div>
+
+      {showForm && (
+        <form className="card animate-slide-down" style={{ marginBottom: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }} onSubmit={submitTest}>
+          <h3 style={{ fontSize: 'var(--font-size-md)' }}>Create Test</h3>
+          <div className="form-group">
+            <label className="form-label">Test Name</label>
+            <input className="form-input" placeholder="e.g. Unit Test 1 — May 2026" value={form.testName} onChange={setF('testName')} required />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+            <div className="form-group">
+              <label className="form-label">Subject</label>
+              <input className="form-input" placeholder="e.g. Mathematics" value={form.subject} onChange={setF('subject')} required />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Max Marks</label>
+              <input className="form-input" type="number" min="1" placeholder="100" value={form.maxMarks} onChange={setF('maxMarks')} required />
+            </div>
+          </div>
+          <p className="text-xs text-muted">💡 Add student marks after creating the test by editing it from the list below.</p>
+          <button className="btn btn-primary" type="submit" disabled={saving}>
+            {saving ? <><span className="spinner"/> Saving…</> : 'Create Test'}
+          </button>
+        </form>
+      )}
+
+      {selectedTest ? (
+        <div className="card animate-fade" style={{ padding: 'var(--space-4)' }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
+            <div>
+              <h3 className="font-semibold">{selectedTest.testName}</h3>
+              <p className="text-xs text-muted">{selectedTest.subject} · Max {selectedTest.maxMarks}</p>
+            </div>
+            <button className="btn btn-ghost" onClick={() => setSelectedTest(null)}>← Back</button>
+          </div>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {students.map(s => {
+              const currentScore = selectedTest.marksMap?.[s.id] ?? '';
+              return (
+                <div key={s.id} className="flex items-center justify-between p-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <div>
+                    <div className="text-sm font-semibold">{s.name}</div>
+                    <div className="text-xs text-muted">{s.registerNumber}</div>
+                  </div>
+                  <input
+                    type="number"
+                    className="form-input"
+                    style={{ width: 80, padding: 4 }}
+                    placeholder="Score"
+                    min="0"
+                    max={selectedTest.maxMarks}
+                    disabled={!!selectedTest.lockedBy}
+                    value={marks[s.id] !== undefined ? marks[s.id] : currentScore}
+                    onChange={(e) => setMarks(m => ({ ...m, [s.id]: e.target.value ? Number(e.target.value) : '' }))}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          {!selectedTest.lockedBy && (
+            <div className="flex gap-2" style={{ marginTop: 'var(--space-4)' }}>
+              <button className="btn btn-primary flex-1" onClick={async () => {
+                setSaving(true);
+                try {
+                  const updatedMarks = { ...(selectedTest.marksMap || {}), ...Object.fromEntries(Object.entries(marks).filter(([_, v]) => v !== '')) };
+                  await updateDocument('results', selectedTest.id, { marksMap: updatedMarks });
+                  toast.success('Marks updated!');
+                  setSelectedTest(null);
+                  setMarks({});
+                } catch (e) {
+                  toast.error(e.message);
+                } finally {
+                  setSaving(false);
+                }
+              }} disabled={saving}>
+                {saving ? 'Saving...' : 'Save Marks'}
+              </button>
+              {(profile.role === 'hod' || profile.role === 'principal') && (
+                <button className="btn btn-danger" onClick={async () => {
+                  if (!window.confirm("Are you sure? Locking prevents further edits.")) return;
+                  try {
+                    await updateDocument('results', selectedTest.id, { lockedBy: profile.id, lockedAt: serverTimestamp() });
+                    toast.success('Test locked');
+                    setSelectedTest(null);
+                  } catch (e) { toast.error(e.message); }
+                }}>Lock Test</button>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          {tests.map(t => (
+            <div key={t.id} className="card" style={{ padding: 'var(--space-4)', cursor: 'pointer' }} onClick={() => { setSelectedTest(t); setMarks({}); }}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold">{t.testName}</div>
+                  <div className="text-xs text-muted">{t.subject} · Max {t.maxMarks}</div>
+                </div>
+                <div className="flex gap-2 items-center">
+                  {t.lockedBy && <span className="badge badge-red">🔒 Locked</span>}
+                  <span className="badge badge-blue">{Object.keys(t.marksMap || {}).length} students</span>
+                </div>
+              </div>
+            </div>
+          ))}
+          {tests.length === 0 && !showForm && (
+            <div className="empty-state"><div className="empty-state-icon">🏆</div><p>No tests created yet</p></div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

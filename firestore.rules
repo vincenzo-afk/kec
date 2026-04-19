@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ──────────────────────────────────────────
+    function isAuth() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(uid())); }
+    function role() { return userDoc().data.role; }
+    function isApproved() { return userDoc().data.approvalStatus == 'approved'; }
+    function isPrincipal() { return isApproved() && role() == 'principal'; }
+    function isHod() { return isApproved() && role() in ['hod', 'principal']; }
+    function isTeacher() { return isApproved() && role() in ['teacher', 'hod', 'principal']; }
+    function isStudent() { return isApproved() && role() == 'student'; }
+
+    // ── Users ─────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isAuth() && (uid() == userId || isTeacher());
+      allow create: if isAuth() && uid() == userId;
+      allow update: if isAuth() && uid() == userId; // preferences only; role changes via Cloud Functions
+    }
+
+    // ── Notes ─────────────────────────────────────────────────────
+    match /notes/{noteId} {
+      allow read: if isApproved();
+      allow write: if isTeacher();
+    }
+
+    // ── Attendance ────────────────────────────────────────────────
+    match /attendance/{recordId} {
+      allow read: if isApproved();
+      allow write: if isTeacher();
+    }
+
+    // ── Results ───────────────────────────────────────────────────
+    match /results/{resultId} {
+      allow read: if isApproved();
+      allow write: if isTeacher();
+    }
+
+    // ── Announcements ─────────────────────────────────────────────
+    match /announcements/{announcementId} {
+      allow read: if isApproved();
+      allow write: if isTeacher();
+    }
+
+    // ── Calendar ──────────────────────────────────────────────────
+    match /calendar/{eventId} {
+      allow read: if isApproved();
+      allow write: if isApproved(); // personal events allowed for all
+    }
+
+    // ── Timetable ─────────────────────────────────────────────────
+    match /timetable/{timetableId} {
+      allow read: if isApproved();
+      allow write: if isTeacher();
+    }
+
+    // ── P2P Chat ──────────────────────────────────────────────────
+    match /chats/p2p/{chatId}/messages/{msgId} {
+      allow read, write: if isApproved() &&
+        (resource == null || resource.data.senderId == uid() || resource.data.receiverId == uid());
+    }
+
+    // ── Group Chat ────────────────────────────────────────────────
+    match /chats/groups/{groupId} {
+      allow read: if isApproved();
+      allow write: if isTeacher();
+      match /messages/{msgId} {
+        allow read, write: if isApproved();
+      }
+    }
+
+    // ── Leave Applications ────────────────────────────────────────
+    match /leaveApplications/{leaveId} {
+      allow read: if isApproved() &&
+        (resource.data.studentId == uid() || isTeacher());
+      allow create: if isApproved();
+      allow update: if isTeacher();
+    }
+
+    // ── Achievements ──────────────────────────────────────────────
+    match /achievements/{achievementId} {
+      allow read: if isApproved();
+      allow create: if isApproved();
+      allow update: if isApproved() &&
+        (resource.data.postedBy == uid() || isHod());
+      allow delete: if isHod();
+    }
+
+    // ── Events ────────────────────────────────────────────────────
+    match /events/{eventId} {
+      allow read: if isApproved();
+      allow create: if isTeacher();
+      allow update: if isApproved(); // registration
+      allow delete: if isTeacher();
+    }
+
+    // ── System (admin only) ───────────────────────────────────────
+    match /system/{doc} {
+      allow read: if isPrincipal();
+      allow write: if false; // Cloud Functions only
+    }
+  }
+}

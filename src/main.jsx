@@ -1,0 +1,37 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import { AuthProvider } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { NotificationProvider } from './contexts/NotificationContext';
+import App from './App';
+import './styles/index.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <AuthProvider>
+        <ThemeProvider>
+          <NotificationProvider>
+            <App />
+            <Toaster
+              position="top-center"
+              toastOptions={{
+                duration: 3500,
+                style: {
+                  fontFamily: 'var(--font-sans)',
+                  fontSize: 'var(--font-size-sm)',
+                  background: 'var(--color-surface)',
+                  color: 'var(--color-text-primary)',
+                  border: '1px solid var(--color-border)',
+                  boxShadow: 'var(--shadow-md)',
+                },
+              }}
+            />
+          </NotificationProvider>
+        </ThemeProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  </React.StrictMode>
+);

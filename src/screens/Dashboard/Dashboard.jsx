@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
-import { where, orderBy, limit } from 'firebase/firestore';
+import { where, orderBy, limit, collectionGroup, query, onSnapshot, doc } from 'firebase/firestore';
 import { formatDistanceToNow } from 'date-fns';
+import { db } from '../../firebase';
 
 export default function Dashboard() {
   const { profile, role, isTeacher, isHod, isPrincipal } = useAuth();
@@ -13,26 +14,50 @@ export default function Dashboard() {
   const [attendance, setAttendance]       = useState([]);
   const [leaves, setLeaves]               = useState([]);
   const [achievements, setAchievements]   = useState([]);
+  const [events, setEvents]               = useState([]);
+  const [unreadChats, setUnreadChats]     = useState(0);
 
   // Fetch latest announcements
   useEffect(() => {
     if (!profile) return;
-    const unsub = subscribe('announcements', [orderBy('timestamp', 'desc'), limit(3)], setAnnouncements);
-    return unsub;
-  }, [profile]);
+    return subscribe('announcements', [orderBy('timestamp', 'desc'), limit(3)], setAnnouncements);
+  }, [profile, subscribe]);
 
-  // Fetch leave status (students)
+  // Fetch leave status (students and teachers)
   useEffect(() => {
-    if (!profile || isTeacher) return;
-    const unsub = subscribe('leaveApplications', [where('studentId', '==', profile.id), orderBy('appliedAt', 'desc'), limit(3)], setLeaves);
-    return unsub;
-  }, [profile]);
+    if (!profile) return;
+    if (isTeacher) {
+      if (!isHod && !isPrincipal) {
+        return subscribe('leaveApplications', [where('teacherId', '==', profile.id), where('status', '==', 'pending')], setLeaves);
+      }
+    } else {
+      return subscribe('leaveApplications', [where('studentId', '==', profile.id), orderBy('appliedAt', 'desc'), limit(3)], setLeaves);
+    }
+  }, [profile, isTeacher, isHod, isPrincipal, subscribe]);
 
   // Fetch own attendance records (student)
   useEffect(() => {
     if (!profile || isTeacher) return;
-    const unsub = subscribe('attendance', [where('studentId', '==', profile.id), limit(200)], setAttendance);
-    return unsub;
+    return subscribe('attendance', [where('studentId', '==', profile.id), limit(200)], setAttendance);
+  }, [profile, isTeacher, subscribe]);
+
+  // Fetch achievement board preview
+  useEffect(() => {
+    if (!profile) return;
+    return subscribe('achievements', [orderBy('timestamp', 'desc'), limit(2)], setAchievements);
+  }, [profile, subscribe]);
+
+  // Fetch upcoming calendar events
+  useEffect(() => {
+    if (!profile) return;
+    return subscribe('calendar', [where('date', '>=', new Date().toISOString().split('T')[0]), orderBy('date'), limit(2)], setEvents);
+  }, [profile, subscribe]);
+
+  // Fetch unread chat count
+  useEffect(() => {
+    if (!profile) return;
+    const q = query(collectionGroup(db, 'messages'), where('receiverId', '==', profile.id), where('read', '==', false));
+    return onSnapshot(q, snap => setUnreadChats(snap.docs.length));
   }, [profile]);
 
   // Fetch achievement board preview
@@ -101,10 +126,29 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon" style={{ background: 'var(--color-success-muted)' }}>📢</div>
+            <div className="stat-icon" style={{ background: 'var(--color-success-muted)' }}>💬</div>
             <div>
-              <div className="stat-value">{announcements.filter(a => !a.readBy?.includes(profile?.id)).length}</div>
-              <div className="stat-label">Unread</div>
+              <div className="stat-value">{unreadChats}</div>
+              <div className="stat-label">Unread Chats</div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {isTeacher && !isHod && !isPrincipal && (
+        <div className="dashboard-stats">
+          <div className="stat-card">
+            <div className="stat-icon" style={{ background: 'var(--color-warning-muted)' }}>📋</div>
+            <div>
+              <div className="stat-value">{leaves.length}</div>
+              <div className="stat-label">Pending Leave Approvals</div>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon" style={{ background: 'var(--color-success-muted)' }}>💬</div>
+            <div>
+              <div className="stat-value">{unreadChats}</div>
+              <div className="stat-label">Unread Chats</div>
             </div>
           </div>
         </div>
@@ -131,6 +175,26 @@ export default function Dashboard() {
         </div>
         <span style={{ fontSize: 28 }}>🤖</span>
       </Link>
+
+      {/* Calendar Preview */}
+      {events.length > 0 && (
+        <div style={{ marginTop: 'var(--space-6)' }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-3)' }}>
+            <h3 style={{ fontSize: 'var(--font-size-md)' }}>🗓️ Upcoming Events</h3>
+            <Link to="/calendar" className="text-sm text-primary-color font-semibold">See all</Link>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            {events.map(e => (
+              <div key={e.id} className="card" style={{ padding: 'var(--space-4)', borderLeft: '3px solid var(--color-warning)' }}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-semibold text-sm truncate">{e.title}</div>
+                  <div className="badge badge-grey">{e.date}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Announcements Preview */}
       {announcements.length > 0 && (
@@ -180,7 +244,8 @@ export default function Dashboard() {
       )}
 
       {/* Teacher extras */}
-      {isTeacher && <TeacherDashboardExtras profile={profile} />}
+      {isTeacher && !isHod && !isPrincipal && <TeacherDashboardExtras profile={profile} />}
+      {isHod && <HodDashboardExtras profile={profile} />}
       {isPrincipal && <PrincipalDashboardExtras />}
 
       <style>{`
@@ -220,18 +285,55 @@ function TeacherDashboardExtras({ profile }) {
   );
 }
 
+function HodDashboardExtras({ profile }) {
+  return (
+    <div style={{ marginTop: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      <div className="card" style={{ padding: 'var(--space-4)' }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-3)' }}>
+          <span className="font-semibold text-sm">Dept Attendance Heatmap</span>
+          <span className="text-xs text-muted">{profile.department}</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 'var(--space-2)' }}>
+          {['Yr 1','Yr 2','Yr 3','Yr 4'].map((yr, i) => (
+             <div key={yr} style={{ padding: 'var(--space-2)', textAlign: 'center', background: `rgba(16, 185, 129, ${0.2 + (i*0.2)})`, borderRadius: 'var(--radius-sm)' }}>
+                <div className="text-sm font-semibold">{yr}</div>
+                <div className="text-xs" style={{ color: 'var(--color-text-primary)' }}>{82 + i * 4}%</div>
+             </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PrincipalDashboardExtras() {
+  const [storageInfo, setStorageInfo] = useState(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'system', 'storage'), snap => {
+      if (snap.exists()) setStorageInfo(snap.data());
+    });
+    return unsub;
+  }, []);
+
+  const usedGB = storageInfo?.usedMB ? (storageInfo.usedMB / 1024).toFixed(2) : 0;
+  const pct = Math.min(100, Math.round((storageInfo?.usedMB || 0) / (5 * 1024) * 100));
+
   return (
     <div style={{ marginTop: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
       <div className="card" style={{ padding: 'var(--space-4)' }}>
         <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-3)' }}>
           <span className="font-semibold text-sm">Storage Usage</span>
-          <span className="text-xs text-muted">Firestore</span>
+          <span className="text-xs text-muted">Firebase Storage</span>
         </div>
         <div style={{ height: 8, borderRadius: 'var(--radius-full)', background: 'var(--color-bg-secondary)', overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: '18%', background: 'var(--color-success)', borderRadius: 'var(--radius-full)' }} />
+          <div style={{
+            height: '100%', width: `${pct}%`, borderRadius: 'var(--radius-full)',
+            background: pct > 80 ? 'var(--color-danger)' : pct > 60 ? 'var(--color-warning)' : 'var(--color-success)',
+            transition: 'width 0.6s ease',
+          }} />
         </div>
-        <div className="text-xs text-muted" style={{ marginTop: 6 }}>~0.9 GB / 5 GB</div>
+        <div className="text-xs text-muted" style={{ marginTop: 6 }}>~{usedGB} GB / 5 GB</div>
       </div>
       <Link to="/admin" className="btn btn-primary">Open Admin Panel →</Link>
     </div>

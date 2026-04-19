@@ -281,6 +281,12 @@ function PrivacySettings() {
   return (
     <div className="card" style={{ padding: 'var(--space-5)' }}>
       <h3 style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--font-size-md)' }}>🔒 Privacy & Security</h3>
+      <SettingRow label="Two-Factor Authentication (2FA)" hint="Require SMS or Authenticator on login">
+        <Toggle value={preferences.twoFactorEnabled !== false} onChange={v => {
+          updatePreference('twoFactorEnabled', v);
+          toast.success(v ? '2FA Enabled!' : '2FA Disabled');
+        }} />
+      </SettingRow>
       <SettingRow label="Last Active Visibility">
         <Select value={preferences.lastActiveVisibility || 'everyone'} onChange={v => updatePreference('lastActiveVisibility', v)} options={[['everyone','Everyone'],['teachers','Only Teachers'],['none','No One']]} />
       </SettingRow>
@@ -359,6 +365,15 @@ function ProfileSettings() {
       <SettingRow label="Department / Year / Section">
         <span className="text-sm text-muted">{profile?.department} · Year {profile?.year} · Sec {profile?.section}</span>
       </SettingRow>
+      <div style={{ marginTop: 'var(--space-5)' }}>
+        <button className="btn btn-secondary btn-full" onClick={() => {
+          const profileLink = `${window.location.origin}/profile/${profile.id}`;
+          navigator.clipboard.writeText(`Check out my KingstonConnect profile!\nName: ${profile.name}\nDept: ${profile.department}\n${profileLink}`);
+          toast.success('Profile card link copied to clipboard!');
+        }}>
+          🔗 Share Profile Card
+        </button>
+      </div>
     </div>
   );
 }

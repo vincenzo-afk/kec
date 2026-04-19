@@ -42,8 +42,8 @@ export default function StudyGPT() {
 
   const hasApiKey = !!profile?.encryptedGeminiKey;
 
-  const send = async () => {
-    const q = input.trim();
+  const doSend = async (qText) => {
+    const q = qText.trim();
     if (!q || loading) return;
     if (!hasApiKey) {
       toast.error('Set your Gemini API key in Settings → AI Settings first');
@@ -63,6 +63,8 @@ export default function StudyGPT() {
     }
   };
 
+  const send = () => doSend(input);
+
   const handleKey = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
@@ -72,10 +74,11 @@ export default function StudyGPT() {
   };
 
   const regenerate = () => {
-    const lastUser = [...messages].reverse().find(m => m.role === 'user');
-    if (!lastUser) return;
-    setMessages(m => m.filter(msg => msg.id !== m[m.length - 1]?.id));
-    setInput(lastUser.content);
+    const lastUserIndex = [...messages].reverse().findIndex(m => m.role === 'user');
+    if (lastUserIndex === -1) return;
+    const lastUser = [...messages].reverse()[lastUserIndex];
+    setMessages(m => m.slice(0, m.length - 1 - lastUserIndex)); 
+    doSend(lastUser.content);
   };
 
   return (

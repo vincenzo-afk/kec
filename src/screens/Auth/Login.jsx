@@ -4,10 +4,11 @@ import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function Login() {
-  const { loginWithEmail } = useAuth();
+  const { loginWithEmail, resetPassword } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState('email');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,6 +33,31 @@ export default function Login() {
           <p className="auth-subtitle">Your College, Smarter.</p>
         </div>
 
+        {tab === 'reset' ? (
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            if (!email) return toast.error('Enter your email');
+            setLoading(true);
+            try {
+              await resetPassword(email);
+              toast.success('Password reset email sent!');
+              setTab('email');
+            } catch (err) {
+              toast.error(err.message);
+            } finally {
+              setLoading(false);
+            }
+          }} className="auth-form">
+            <div className="form-group">
+              <label className="form-label">College Email</label>
+              <input className="form-input" type="email" placeholder="you@kec.edu.in" value={email} onChange={e => setEmail(e.target.value)} required />
+            </div>
+            <button className="btn btn-primary btn-full btn-lg" disabled={loading} type="submit">
+              {loading ? <span className="spinner" /> : 'Send Reset Link'}
+            </button>
+            <button type="button" className="btn btn-ghost btn-full" onClick={() => setTab('email')}>Back to Login</button>
+          </form>
+        ) : (
         <form onSubmit={handleSubmit} className="auth-form">
           <div className="form-group">
             <label className="form-label">College Email</label>
@@ -64,12 +90,18 @@ export default function Login() {
             {loading ? <><span className="spinner" /> Signing in…</> : 'Sign In'}
           </button>
         </form>
+        )}
 
-        <div style={{ textAlign: 'center', marginTop: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <Link to="/signup" className="text-sm text-primary-color font-semibold">
-            New here? Create an account →
-          </Link>
-        </div>
+        {tab !== 'reset' && (
+          <div style={{ textAlign: 'center', marginTop: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTab('reset')} style={{ alignSelf: 'center' }}>
+              Forgot password?
+            </button>
+            <Link to="/signup" className="text-sm text-primary-color font-semibold">
+              New here? Create an account →
+            </Link>
+          </div>
+        )}
       </div>
 
       <style>{`

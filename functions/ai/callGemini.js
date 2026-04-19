@@ -86,12 +86,16 @@ async function buildAIContext(userId, options = {}) {
   }
 
   // Announcements
+  // Avoid compound query requiring composite index and 'in' query with null
   const annSnap = await db.collection('announcements')
-    .where('targetSection', 'in', [classId, null])
     .orderBy('timestamp', 'desc')
-    .limit(2)
+    .limit(10)
     .get();
-  context.announcements = annSnap.docs.map(d => d.data().title);
+  context.announcements = annSnap.docs
+    .map(d => d.data())
+    .filter(a => !a.targetSection || a.targetSection === classId)
+    .slice(0, 2)
+    .map(a => a.title);
 
   // Registered Events
   const eventsSnap = await db.collection('events')

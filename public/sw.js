@@ -12,6 +12,11 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  // Only handle same-origin requests. Let the browser handle cross-origin
+  // traffic (Firebase Auth, Google APIs, etc.) so we don't return synthetic
+  // 503s for network calls.
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith(
     fetch(event.request)
@@ -24,7 +29,8 @@ self.addEventListener('fetch', (event) => {
         const cached = await caches.match(event.request);
         if (cached) return cached;
         if (event.request.mode === 'navigate') return caches.match(OFFLINE_URL);
-        return new Response('', { status: 503, statusText: 'Offline' });
+        // For non-navigation requests, let the request fail naturally.
+        return Response.error();
       })
   );
 });

@@ -20,7 +20,12 @@ export default function Login() {
     try {
       await loginWithEmail(email, password);
     } catch (err) {
-      const msg = err.code === 'auth/invalid-credential' ? 'Invalid email or password' : err.message;
+      const msg =
+        err?.code === 'auth/invalid-credential' ? 'Invalid email or password' :
+        err?.code === 'auth/operation-not-allowed' ? 'Email/password sign-in is disabled for this Firebase project.' :
+        err?.code === 'auth/too-many-requests' ? 'Too many attempts. Try again later.' :
+        err?.code === 'auth/network-request-failed' ? 'Network error. Check your internet connection.' :
+        err?.message || 'Sign-in failed.';
       toast.error(msg);
     } finally {
       setLoading(false);

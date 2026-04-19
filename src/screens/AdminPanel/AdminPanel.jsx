@@ -78,9 +78,7 @@ function UsersTab() {
       await fn({ userId, ...approvalData });
       toast.success('User approved!');
     } catch (e) {
-      // Fallback direct update if function not deployed yet
-      await updateDoc(doc(db, 'users', userId), { approvalStatus: 'approved', ...approvalData });
-      toast.success('User approved (direct)');
+      toast.error(e?.message || 'Approval failed. If you are on emulators, start the Functions emulator.');
     } finally {
       setProcessing(p => ({ ...p, [userId]: false }));
     }

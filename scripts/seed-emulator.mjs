@@ -2,7 +2,7 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
-process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || 'kingstonconnect';
+process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || 'kec-26';
 
 initializeApp({ projectId: process.env.GCLOUD_PROJECT });
 const db = getFirestore();
@@ -11,6 +11,7 @@ const users = [
   { id: 'student_demo_1', name: 'Demo Student', role: 'student', department: 'CSE', year: '2', section: 'A', approvalStatus: 'approved', email: 'student@example.com' },
   { id: 'teacher_demo_1', name: 'Demo Teacher', role: 'teacher', department: 'CSE', year: '2', section: 'A', approvalStatus: 'approved', email: 'teacher@example.com' },
   { id: 'hod_demo_1', name: 'Demo HOD', role: 'hod', department: 'CSE', year: '2', section: 'A', approvalStatus: 'approved', email: 'hod@example.com' },
+  { id: 'principal_demo_1', name: 'Demo Principal', role: 'principal', department: 'Admin', year: '', section: '', approvalStatus: 'approved', email: 'principal@example.com' },
 ];
 
 const now = new Date().toISOString().slice(0, 10);

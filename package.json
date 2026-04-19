@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:emu": "firebase emulators:start --only auth,firestore,functions --import .emulator-data --export-on-exit .emulator-data",
+    "dev:seed": "node scripts/create-auth-users.mjs && node scripts/seed-emulator.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "seed:emulator": "node scripts/seed-emulator.mjs",
@@ -13,6 +15,7 @@
   "dependencies": {
     "date-fns": "^3.6.0",
     "firebase": "^10.12.2",
+    "firebase-admin": "^12.1.0",
     "lucide-react": "^0.395.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

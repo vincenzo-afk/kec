@@ -14,6 +14,8 @@ export function NotificationProvider({ children }) {
 
   useEffect(() => {
     if (!user || !isApproved) return;
+    // Push notifications are noisy/fragile in local emulator dev.
+    if (import.meta.env.DEV && String(import.meta.env.VITE_USE_EMULATORS || '') === 'true') return;
     let unsub;
     (async () => {
       const messaging = await getMessagingInstance();

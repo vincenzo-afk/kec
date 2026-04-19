@@ -38,15 +38,21 @@ function UsersTab() {
   const [users, setUsers] = useState([]);
   const [lastDoc, setLastDoc] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ role: 'all', status: 'all', search: '' });
   const [processing, setProcessing] = useState({});
 
   useEffect(() => {
-    const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(200));
-    return onSnapshot(q, snap => {
+    let mounted = true;
+    (async () => {
+      const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(200));
+      const snap = await getDocs(q);
+      if (!mounted) return;
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setLastDoc(snap.docs[snap.docs.length - 1] || null);
-    });
+      setLoading(false);
+    })();
+    return () => { mounted = false; };
   }, []);
 
   const loadMore = async () => {
@@ -83,7 +89,8 @@ function UsersTab() {
   const suspendUser = async (userId) => {
     setProcessing(p => ({ ...p, [userId]: true }));
     try {
-      await updateDoc(doc(db, 'users', userId), { approvalStatus: 'suspended' });
+      const fn = httpsCallable(functions, 'suspendUser');
+      await fn({ userId });
       toast.success('User suspended');
     } catch (e) { toast.error(e.message); }
     finally { setProcessing(p => ({ ...p, [userId]: false })); }
@@ -122,6 +129,7 @@ function UsersTab() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        {loading && <div className="text-sm text-muted">Loading users…</div>}
         {filtered.length === 0 && <div className="empty-state"><div className="empty-state-icon">👥</div><p>No users found</p></div>}
         {filtered.map(u => <UserCard key={u.id} u={u} onApprove={approveUser} onSuspend={suspendUser} processing={processing[u.id]} />)}
       </div>
@@ -377,17 +385,26 @@ function ReportsTab() {
 
   const exportAttendanceSummary = async () => {
     try {
-      const snap = await getDocs(query(collection(db, 'attendance'), orderBy('date', 'desc'), limit(5000)));
       const byClass = {};
-      snap.docs.forEach((d) => {
-        const r = d.data();
-        const key = r.classId || 'unknown';
-        if (!byClass[key]) byClass[key] = { classId: key, total: 0, present: 0, absent: 0, leave: 0 };
-        byClass[key].total += 1;
-        if (r.status === 'present') byClass[key].present += 1;
-        if (r.status === 'absent') byClass[key].absent += 1;
-        if (r.status === 'leave') byClass[key].leave += 1;
-      });
+      let cursor = null;
+      while (true) {
+        const q = cursor
+          ? query(collection(db, 'attendance'), orderBy('date', 'desc'), startAfter(cursor), limit(2000))
+          : query(collection(db, 'attendance'), orderBy('date', 'desc'), limit(2000));
+        const snap = await getDocs(q);
+        if (snap.empty) break;
+        snap.docs.forEach((d) => {
+          const r = d.data();
+          const key = r.classId || 'unknown';
+          if (!byClass[key]) byClass[key] = { classId: key, total: 0, present: 0, absent: 0, leave: 0 };
+          byClass[key].total += 1;
+          if (r.status === 'present') byClass[key].present += 1;
+          if (r.status === 'absent') byClass[key].absent += 1;
+          if (r.status === 'leave') byClass[key].leave += 1;
+        });
+        cursor = snap.docs[snap.docs.length - 1];
+        if (snap.docs.length < 2000) break;
+      }
       const rows = Object.values(byClass).map((r) => ({
         ...r,
         attendancePct: r.total ? Math.round(((r.present + r.leave) / r.total) * 100) : 0,

@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { where, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 import { db, storage } from '../../firebase';
-import { doc, collection, addDoc, onSnapshot, query, updateDoc, setDoc, getDocs } from 'firebase/firestore';
+import { doc, collection, addDoc, onSnapshot, query, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { formatDistanceToNow } from 'date-fns';
 import StudyGPT from '../StudyGPT/StudyGPT';
@@ -44,34 +44,22 @@ function P2PTab() {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('users', [where('approvalStatus', '==', 'approved'), limit(50)], usersData => {
-      const canCross = profile.preferences?.crossDepartmentChat !== false;
-      const filtered = usersData.filter(u => {
-        if (u.id === profile.id) return false;
-        if (!canCross && u.department !== profile.department) return false;
-        return true;
-      });
-      const convs = filtered.map(u => ({
-        chatId: [profile.id, u.id].sort().join('-'),
-        otherUser: u,
-        lastMessage: 'Tap to chat',
-        unread: 0
-      }));
-      setConversations(convs);
+    return subscribe('users', [where('approvalStatus', '==', 'approved'), limit(200)], usersData => {
+      setUsers(usersData.filter(u => u.id !== profile.id));
     });
   }, [profile, subscribe]);
 
   useEffect(() => {
     if (!profile?.id) return;
-    const q = query(collection(db, 'chats/p2pMeta'), where('members', 'array-contains', profile.id), orderBy('lastMessageAt', 'desc'), limit(100));
+    const q = query(collection(db, 'p2pMeta'), where('members', 'array-contains', profile.id), orderBy('lastMessageAt', 'desc'), limit(100));
     return onSnapshot(q, async (snap) => {
       const rows = await Promise.all(snap.docs.map(async (d) => {
         const m = d.data();
         const otherId = (m.members || []).find(id => id !== profile.id);
         let otherUser = users.find(u => u.id === otherId);
         if (!otherUser && otherId) {
-          const s = await getDocs(query(collection(db, 'users'), where('__name__', '==', otherId), limit(1)));
-          otherUser = s.docs[0] ? { id: s.docs[0].id, ...s.docs[0].data() } : { id: otherId, name: 'Unknown user' };
+          const s = await getDoc(doc(db, 'users', otherId));
+          otherUser = s.exists() ? { id: s.id, ...s.data() } : { id: otherId, name: 'Unknown user' };
         }
         return {
           chatId: d.id,
@@ -140,15 +128,17 @@ function P2PConversation({ chatId, other, onBack, profile }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    const q = query(collection(db, `chats/p2p/${chatId}/messages`), orderBy('timestamp', 'asc'));
+    const q = query(collection(db, `p2pChats/${chatId}/messages`), orderBy('timestamp', 'asc'));
     return onSnapshot(q, snap => {
-      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const rows = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter((m) => !(Array.isArray(m.deletedFor) && m.deletedFor.includes(profile.id)));
       setMessages(rows);
       const unreadIncoming = rows.filter(m => m.senderId === other.id && m.read === false).map(m => m.id);
       unreadIncoming.forEach((id) => {
-        updateDoc(doc(db, `chats/p2p/${chatId}/messages/${id}`), { read: true }).catch(() => {});
+        updateDoc(doc(db, `p2pChats/${chatId}/messages/${id}`), { read: true }).catch(() => {});
       });
-      setDoc(doc(db, `chats/p2pMeta/${chatId}`), { [`unreadBy.${profile.id}`]: 0 }, { merge: true }).catch(() => {});
+      setDoc(doc(db, `p2pMeta/${chatId}`), { [`unreadBy.${profile.id}`]: 0 }, { merge: true }).catch(() => {});
     });
   }, [chatId, other.id, profile.id]);
 
@@ -156,17 +146,19 @@ function P2PConversation({ chatId, other, onBack, profile }) {
 
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
-  const isOnline = other?.lastActive?.toDate ? (Date.now() - other.lastActive.toDate().getTime()) < 5 * 60 * 1000 : false;
+  const isOnline = profile?.preferences?.showOnlineStatus !== false && other?.lastActive?.toDate
+    ? (Date.now() - other.lastActive.toDate().getTime()) < 5 * 60 * 1000
+    : false;
 
   const send = async (imageURL = null) => {
     if (!text.trim() && !imageURL) return;
     const messageText = text.trim();
-    await addDoc(collection(db, `chats/p2p/${chatId}/messages`), {
+    await addDoc(collection(db, `p2pChats/${chatId}/messages`), {
       senderId: profile.id, receiverId: other.id,
       text: messageText, imageURL: imageURL || null,
       timestamp: serverTimestamp(), read: false, deletedFor: [],
     });
-    await setDoc(doc(db, `chats/p2pMeta/${chatId}`), {
+    await setDoc(doc(db, `p2pMeta/${chatId}`), {
       members: [profile.id, other.id].sort(),
       lastMessage: imageURL ? '📷 Image' : messageText,
       lastMessageAt: serverTimestamp(),
@@ -214,13 +206,13 @@ function P2PConversation({ chatId, other, onBack, profile }) {
                 {m.imageURL && profile?.preferences?.imageAutoDownload !== false && (
                   <a href={m.imageURL} download className="text-xs" style={{ display: 'block', color: isMe ? '#fff' : 'var(--color-primary)', marginBottom: 4 }}>Download image</a>
                 )}
-                {m.text}
+                {m.deletedForEveryone ? 'This message was deleted' : m.text}
                 <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, textAlign: 'right' }}>
                   {m.timestamp?.toDate ? formatDistanceToNow(m.timestamp.toDate(), { addSuffix: true }) : ''}
                   {isMe && <span style={{ marginLeft: 4 }}>{m.read ? ' ✓✓' : ' ✓'}</span>}
                 </div>
                 {isMe && !m.deletedForEveryone && (
-                  <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: 0, marginTop: 4, color: 'inherit' }} onClick={() => updateDoc(doc(db, `chats/p2p/${chatId}/messages/${m.id}`), { text: 'This message was deleted', imageURL: null, deletedForEveryone: true })}>
+                  <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: 0, marginTop: 4, color: 'inherit' }} onClick={() => updateDoc(doc(db, `p2pChats/${chatId}/messages/${m.id}`), { text: 'This message was deleted', imageURL: null, deletedForEveryone: true })}>
                     Delete for everyone
                   </button>
                 )}
@@ -248,12 +240,25 @@ function GroupsTab() {
   const [groups, setGroups] = useState([]);
   const [active, setActive] = useState(null);
   const [showInfo, setShowInfo] = useState(null);
+  const [memberNames, setMemberNames] = useState({});
 
   useEffect(() => {
     if (!profile?.id) return;
-    const q = query(collection(db, 'chats/groups'), where('members', 'array-contains', profile.id));
+    const q = query(collection(db, 'groupChats'), where('members', 'array-contains', profile.id));
     return onSnapshot(q, snap => setGroups(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, [profile?.id]);
+
+  useEffect(() => {
+    if (!showInfo?.members?.length) return;
+    Promise.all(showInfo.members.map(async (id) => {
+      try {
+        const snap = await getDoc(doc(db, 'users', id));
+        return [id, snap.exists() ? (snap.data().name || id) : id];
+      } catch {
+        return [id, id];
+      }
+    })).then((rows) => setMemberNames(Object.fromEntries(rows)));
+  }, [showInfo]);
 
   if (active) return <GroupConversation group={active} onBack={() => setActive(null)} profile={profile} />;
 
@@ -279,7 +284,7 @@ function GroupsTab() {
             <h3 style={{ marginBottom: 'var(--space-3)' }}>{showInfo.groupName}</h3>
             <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-3)' }}>Members</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(showInfo.members || []).map((m) => <div key={m} className="text-sm">{m}</div>)}
+              {(showInfo.members || []).map((m) => <div key={m} className="text-sm">{memberNames[m] || m}</div>)}
             </div>
             <button className="btn btn-secondary btn-full" style={{ marginTop: 'var(--space-4)' }} onClick={() => setShowInfo(null)}>Close</button>
           </div>
@@ -295,7 +300,7 @@ function GroupConversation({ group, onBack, profile }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    const q = query(collection(db, `chats/groups/${group.id}/messages`), orderBy('timestamp', 'asc'), limit(100));
+    const q = query(collection(db, `groupChats/${group.id}/messages`), orderBy('timestamp', 'asc'), limit(100));
     return onSnapshot(q, snap => setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, [group.id]);
 
@@ -303,7 +308,7 @@ function GroupConversation({ group, onBack, profile }) {
 
   const send = async () => {
     if (!text.trim()) return;
-    await addDoc(collection(db, `chats/groups/${group.id}/messages`), {
+    await addDoc(collection(db, `groupChats/${group.id}/messages`), {
       senderId: profile.id, text: text.trim(), timestamp: serverTimestamp(), readBy: [profile.id],
     });
     setText('');

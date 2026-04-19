@@ -29,14 +29,11 @@ async function fetchPDFContext(user) {
     const note = doc.data();
     if (note.mimeType === 'application/pdf') {
       try {
-        // Construct the file path as stored in Firebase Storage
-        // The fileURL might be a download URL, but we need the bucket path to download internally
-        // In the README: /notes/{dept}/{year}/{section}/{subject}/{filename}
-        
-        // Try to parse the filename from the URL or just query by prefix if needed
-        // Assuming fileURL contains the path or we saved the path.
-        // Actually, let's just extract the path from the un-encoded download URL
-        let storagePath = decodeURIComponent(note.fileURL.split('/o/')[1].split('?alt=media')[0]);
+        let storagePath = note.storagePath || null;
+        if (!storagePath && note.fileURL?.includes('/o/')) {
+          storagePath = decodeURIComponent(note.fileURL.split('/o/')[1].split('?')[0]);
+        }
+        if (!storagePath) continue;
         
         const file = bucket.file(storagePath);
         const [buffer] = await file.download();

@@ -10,7 +10,7 @@ import {
   RecaptchaVerifier,
   signInWithPhoneNumber,
 } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
 const AuthContext = createContext(null);
@@ -47,6 +47,20 @@ export function AuthProvider({ children }) {
     return unsub;
   }, [user]);
 
+  // Keep lastActive fresh for presence/online indicators
+  useEffect(() => {
+    if (!user) return;
+    const ref = doc(db, 'users', user.uid);
+    const tick = async () => {
+      try {
+        await updateDoc(ref, { lastActive: serverTimestamp() });
+      } catch (_) {}
+    };
+    tick();
+    const id = setInterval(tick, 120000);
+    return () => clearInterval(id);
+  }, [user]);
+
   // Email / Password signup
   const signupWithEmail = async (email, password, displayName) => {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -71,16 +85,34 @@ export function AuthProvider({ children }) {
     return cred;
   };
 
-  const loginWithEmail = (email, password) =>
-    signInWithEmailAndPassword(auth, email, password);
+  const loginWithEmail = async (email, password) => {
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    const profileSnap = await getDoc(doc(db, 'users', cred.user.uid));
+    const prefs = profileSnap.exists() ? (profileSnap.data().preferences || {}) : {};
+    if (prefs.twoFactorEnabled === true && !cred.user.phoneNumber) {
+      await signOut(auth);
+      throw new Error('2FA is enabled. Use phone OTP login.');
+    }
+    return cred;
+  };
 
-  const logout = () => signOut(auth);
+  const logout = async () => {
+    if (user) {
+      try {
+        await updateDoc(doc(db, 'users', user.uid), { lastActive: serverTimestamp() });
+      } catch (_) {}
+    }
+    return signOut(auth);
+  };
 
   const resetPassword = (email) => sendPasswordResetEmail(auth, email);
   const requestPhoneOtp = async (phoneNumber, recaptchaContainerId = 'recaptcha-container') => {
-    if (!window.recaptchaVerifier) {
-      window.recaptchaVerifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
+    if (window.recaptchaVerifier) {
+      try { window.recaptchaVerifier.clear(); } catch (_) {}
+      window.recaptchaVerifier = null;
     }
+    window.recaptchaVerifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
+    await window.recaptchaVerifier.render();
     return signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
   };
 

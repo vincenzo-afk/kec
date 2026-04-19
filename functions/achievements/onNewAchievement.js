@@ -9,6 +9,12 @@ exports.onNewAchievement = onDocumentCreated('achievements/{achievementId}', asy
   const data = event.data?.data();
   if (!data) return;
 
+  if (data.postedBy) {
+    await db.doc(`users/${data.postedBy}`).set({
+      lastAchievementAt: new Date(),
+    }, { merge: true });
+  }
+
   // Notify all approved users (throttled — max 1 per 30 mins handled by checking last notif time)
   const usersSnap = await db.collection('users').where('approvalStatus', '==', 'approved').limit(500).get();
   const tokens = usersSnap.docs.map(d => d.data().fcmToken).filter(Boolean);

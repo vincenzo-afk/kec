@@ -28,11 +28,14 @@ export default function NotesUpload() {
       await addDocument('notes', {
         subject: subject.trim(),
         fileURL: url,
+        storagePath: path,
+        mimeType: file.type || 'application/octet-stream',
         fileName: file.name,
         department: profile.department,
         year: profile.year,
         section: profile.section,
         uploadedBy: profile.id,
+        uploadedAt: new Date(),
       });
       setFile(null);
       setSubject('');

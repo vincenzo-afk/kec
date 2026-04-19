@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { orderBy, limit, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatDistanceToNow, isPast, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -109,8 +109,25 @@ export default function EventRegistration() {
     toast.success('Event cancelled');
   };
 
-  const exportRegistrations = (event) => {
-    const rows = (event.registrations || []).map((id) => ({ studentId: id, eventTitle: event.title, eventDate: event.date }));
+  const exportRegistrations = async (event) => {
+    const rows = await Promise.all((event.registrations || []).map(async (id) => {
+      try {
+        const snap = await getDoc(doc(db, 'users', id));
+        const u = snap.exists() ? snap.data() : {};
+        return {
+          studentId: id,
+          studentName: u.name || '',
+          registerNumber: u.registerNumber || '',
+          department: u.department || '',
+          year: u.year || '',
+          section: u.section || '',
+          eventTitle: event.title,
+          eventDate: event.date,
+        };
+      } catch {
+        return { studentId: id, studentName: '', registerNumber: '', department: '', year: '', section: '', eventTitle: event.title, eventDate: event.date };
+      }
+    }));
     if (!rows.length) return toast.error('No registrations');
     const headers = Object.keys(rows[0]);
     const csv = [headers.join(','), ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','))].join('\\n');

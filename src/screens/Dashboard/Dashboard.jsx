@@ -286,6 +286,29 @@ function TeacherDashboardExtras({ profile }) {
 }
 
 function HodDashboardExtras({ profile }) {
+  const { subscribe } = useFirestore();
+  const [yearPct, setYearPct] = useState({ '1': 0, '2': 0, '3': 0, '4': 0 });
+
+  useEffect(() => {
+    if (!profile?.department) return;
+    return subscribe('attendance', [limit(5000)], (rows) => {
+      const filtered = rows.filter((r) => (r.classId || '').startsWith(`${profile.department}-`));
+      const stats = { '1': { total: 0, good: 0 }, '2': { total: 0, good: 0 }, '3': { total: 0, good: 0 }, '4': { total: 0, good: 0 } };
+      filtered.forEach((r) => {
+        const year = String((r.classId || '').split('-')[1] || '');
+        if (!stats[year]) return;
+        stats[year].total += 1;
+        if (r.status === 'present' || r.status === 'leave') stats[year].good += 1;
+      });
+      setYearPct({
+        '1': stats['1'].total ? Math.round((stats['1'].good / stats['1'].total) * 100) : 0,
+        '2': stats['2'].total ? Math.round((stats['2'].good / stats['2'].total) * 100) : 0,
+        '3': stats['3'].total ? Math.round((stats['3'].good / stats['3'].total) * 100) : 0,
+        '4': stats['4'].total ? Math.round((stats['4'].good / stats['4'].total) * 100) : 0,
+      });
+    });
+  }, [profile?.department, subscribe]);
+
   return (
     <div style={{ marginTop: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
       <div className="card" style={{ padding: 'var(--space-4)' }}>
@@ -294,10 +317,10 @@ function HodDashboardExtras({ profile }) {
           <span className="text-xs text-muted">{profile.department}</span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 'var(--space-2)' }}>
-          {['Yr 1','Yr 2','Yr 3','Yr 4'].map((yr, i) => (
-             <div key={yr} style={{ padding: 'var(--space-2)', textAlign: 'center', background: `rgba(16, 185, 129, ${0.2 + (i*0.2)})`, borderRadius: 'var(--radius-sm)' }}>
+          {['1','2','3','4'].map((yr, i) => (
+             <div key={yr} style={{ padding: 'var(--space-2)', textAlign: 'center', background: `rgba(16, 185, 129, ${Math.max(0.2, (yearPct[yr] || 0) / 100)})`, borderRadius: 'var(--radius-sm)' }}>
                 <div className="text-sm font-semibold">{yr}</div>
-                <div className="text-xs" style={{ color: 'var(--color-text-primary)' }}>{82 + i * 4}%</div>
+                <div className="text-xs" style={{ color: 'var(--color-text-primary)' }}>{yearPct[yr] || 0}%</div>
              </div>
           ))}
         </div>

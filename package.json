@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "seed:emulator": "node scripts/seed-emulator.mjs"
+    "seed:emulator": "node scripts/seed-emulator.mjs",
+    "test:rules": "npx -y firebase-tools@12.9.1 emulators:exec --only firestore \"node --test tests/firestore.rules.test.mjs\""
   },
   "dependencies": {
     "date-fns": "^3.6.0",
@@ -20,9 +21,11 @@
     "sharp": "^0.34.5"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.1",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.2.1",
+    "firebase-tools": "^13.29.3",
     "vite": "^5.2.0",
     "vite-plugin-pwa": "^0.20.0",
     "workbox-build": "^7.4.0",

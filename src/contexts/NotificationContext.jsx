@@ -3,7 +3,8 @@ import { useAuth } from './AuthContext';
 import { getMessagingInstance } from '../firebase';
 import { getToken, onMessage } from 'firebase/messaging';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, functions } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
 import toast from 'react-hot-toast';
 
 const NotificationContext = createContext(null);
@@ -26,6 +27,12 @@ export function NotificationProvider({ children }) {
         });
         if (token) {
           await updateDoc(doc(db, 'users', user.uid), { fcmToken: token });
+          try {
+            const fn = httpsCallable(functions, 'syncNotificationTopics');
+            await fn({ token });
+          } catch (e) {
+            console.warn('Topic sync failed:', e);
+          }
         }
       } catch (e) {
         console.warn('FCM token error:', e);

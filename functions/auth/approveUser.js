@@ -28,12 +28,11 @@ exports.approveUser = onCall({ enforceAppCheck: false }, async (request) => {
 
   // Auto-create section group chat if not exists
   const classId = `${department}-${year}-${section}`;
-  const groupRef = db.collection('chats/groups/meta');
-  const existing = await db.collection('chats').doc('groups').collection('meta')
+  const existing = await db.collection('groupChats')
     .where('classId', '==', classId).limit(1).get();
 
   if (existing.empty) {
-    await db.collection('chats').doc('groups').collection('meta').add({
+    await db.collection('groupChats').add({
       groupName: `${department} ${year}${section}`,
       classId, members: [userId],
       createdAt: FieldValue.serverTimestamp(),

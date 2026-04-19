@@ -1,4 +1,4 @@
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useCallback } from 'react';
@@ -11,13 +11,12 @@ export function usePreferences() {
 
   const updatePreference = useCallback(async (key, value) => {
     if (!user) return;
-    const updateObj = key.includes('.')
-      ? { [`preferences.${key}`]: value }
-      : { [`preferences.${key}`]: value };
-    await setDoc(doc(db, 'users', user.uid), {
-      ...updateObj,
-      lastActive: serverTimestamp(),
-    }, { merge: true });
+    const updateObj = { [`preferences.${key}`]: value, lastActive: serverTimestamp() };
+    try {
+      await updateDoc(doc(db, 'users', user.uid), updateObj);
+    } catch {
+      await setDoc(doc(db, 'users', user.uid), updateObj, { merge: true });
+    }
   }, [user]);
 
   const updatePreferences = useCallback(async (prefs) => {
@@ -26,10 +25,15 @@ export function usePreferences() {
       acc[`preferences.${k}`] = v;
       return acc;
     }, {});
-    await setDoc(doc(db, 'users', user.uid), {
+    const payload = {
       ...flattened,
-      lastActive: serverTimestamp()
-    }, { merge: true });
+      lastActive: serverTimestamp(),
+    };
+    try {
+      await updateDoc(doc(db, 'users', user.uid), payload);
+    } catch {
+      await setDoc(doc(db, 'users', user.uid), payload, { merge: true });
+    }
   }, [user]);
 
   return {

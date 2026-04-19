@@ -6,6 +6,7 @@ initializeApp();
 exports.onUserSignup = require('./auth/onUserSignup').onUserSignup;
 exports.approveUser  = require('./auth/approveUser').approveUser;
 exports.suspendUser  = require('./auth/suspendUser').suspendUser;
+exports.setTwoFactor = require('./auth/setTwoFactor').setTwoFactor;
 
 // ── API Key / Gemini ────────────────────────────────────────────────
 exports.encryptApiKey = require('./crypto/encryptApiKey').encryptApiKey;
@@ -17,6 +18,7 @@ exports.storageMonitorScheduled = require('./storage/storageMonitor').storageMon
 
 // ── Notifications ───────────────────────────────────────────────────
 exports.sendNotification = require('./notifications/sendNotification').sendNotification;
+exports.syncNotificationTopics = require('./notifications/manageTopics').syncNotificationTopics;
 
 // ── Leave functions ─────────────────────────────────────────────────
 exports.onLeaveApply  = require('./leave/onLeaveApply').onLeaveApply;

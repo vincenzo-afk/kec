@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { where, orderBy } from 'firebase/firestore';
@@ -17,11 +17,12 @@ export default function CalendarScreen() {
   const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState({ test: true, holiday: true, personal: true, event: true });
   const [form, setForm] = useState({ title: '', type: 'personal', description: '', visibility: 'personal' });
+  const pressTimer = useRef(null);
 
   useEffect(() => {
     if (!profile) return;
     return subscribe('calendar', [orderBy('date', 'asc')], setEvents);
-  }, [profile]);
+  }, [profile, subscribe]);
 
   const days = eachDayOfInterval({ start: startOfMonth(month), end: endOfMonth(month) });
 
@@ -52,6 +53,7 @@ export default function CalendarScreen() {
         date: format(selected, 'yyyy-MM-dd'),
         createdBy: profile.id,
         targetDept: profile.department || null,
+        targetYear: profile.year || null,
         targetSection: profile.section || null,
         endDate: null,
         relatedEventId: null,
@@ -101,9 +103,22 @@ export default function CalendarScreen() {
             const dayEvents = eventsForDay(day);
             const isSelected = selected && isSameDay(day, selected);
             const isToday = isSameDay(day, new Date());
-              <button key={day.toISOString()} 
-                onClick={() => setSelected(isSameDay(day, selected||new Date('invalid')) ? null : day)}
+            return (
+              <button key={day.toISOString()}
+                onClick={() => setSelected(isSameDay(day, selected || new Date('invalid')) ? null : day)}
                 onContextMenu={(e) => { e.preventDefault(); setSelected(day); setShowAdd(true); }}
+                onTouchStart={() => {
+                  pressTimer.current = setTimeout(() => {
+                    setSelected(day);
+                    setShowAdd(true);
+                  }, 450);
+                }}
+                onTouchEnd={() => {
+                  if (pressTimer.current) clearTimeout(pressTimer.current);
+                }}
+                onTouchMove={() => {
+                  if (pressTimer.current) clearTimeout(pressTimer.current);
+                }}
                 style={{
                   aspectRatio: '1', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer',
                   background: isSelected ? 'var(--color-primary)' : isToday ? 'var(--color-primary-muted)' : 'transparent',

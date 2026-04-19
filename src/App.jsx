@@ -6,6 +6,7 @@ import { useAuth } from './contexts/AuthContext';
 import Login from './screens/Auth/Login';
 import Signup from './screens/Auth/Signup';
 import PendingApproval from './screens/Auth/PendingApproval';
+import ResetPassword from './screens/Auth/ResetPassword';
 
 // Layouts
 import AppShell from './components/AppShell';
@@ -78,6 +79,7 @@ export default function App() {
       {/* Public */}
       <Route path="/login" element={!user ? <Login /> : (isPending ? <Navigate to="/pending" /> : <Navigate to="/" />)} />
       <Route path="/signup" element={!user ? <Signup /> : (isPending ? <Navigate to="/pending" /> : <Navigate to="/" />)} />
+      <Route path="/reset-password" element={!user ? <ResetPassword /> : <Navigate to="/" />} />
       <Route path="/pending" element={
         <RequireAuth>
           {isApproved ? <Navigate to="/" /> : <PendingApproval />}

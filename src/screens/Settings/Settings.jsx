@@ -5,8 +5,9 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { usePreferences } from '../../hooks/usePreferences';
 import { useGemini } from '../../hooks/useGemini';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage, db } from '../../firebase';
+import { storage, db, functions } from '../../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import toast from 'react-hot-toast';
 
 const SECTIONS = [
@@ -227,6 +228,7 @@ function AISettings() {
 /* ── Notifications ── */
 function NotificationSettings() {
   const { preferences, updatePreference } = usePreferences();
+  const enabled = preferences.notificationsEnabled !== false;
   const types = [
     ['announcements','New Announcements'],['chatP2P','P2P Messages'],['chatGroup','Group Messages'],
     ['results','New Test Results'],['notes','New Notes'],['leave','Leave Updates'],
@@ -240,7 +242,7 @@ function NotificationSettings() {
       </SettingRow>
       {types.map(([k, l]) => (
         <SettingRow key={k} label={l}>
-          <Toggle value={preferences.notificationTypes?.[k] !== false} onChange={v => updatePreference(`notificationTypes.${k}`, v)} />
+          <Toggle value={preferences.notificationTypes?.[k] !== false} onChange={v => enabled && updatePreference(`notificationTypes.${k}`, v)} />
         </SettingRow>
       ))}
     </div>
@@ -324,14 +326,21 @@ function AdminSettings() {
 /* ── Privacy ── */
 function PrivacySettings() {
   const { preferences, updatePreference } = usePreferences();
+  const toggleTwoFactor = async (v) => {
+    try {
+      const fn = httpsCallable(functions, 'setTwoFactor');
+      await fn({ enabled: v });
+      await updatePreference('twoFactorEnabled', v);
+      toast.success(v ? '2FA Enabled!' : '2FA Disabled');
+    } catch (e) {
+      toast.error(e.message || 'Failed to update 2FA');
+    }
+  };
   return (
     <div className="card" style={{ padding: 'var(--space-5)' }}>
       <h3 style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--font-size-md)' }}>🔒 Privacy & Security</h3>
       <SettingRow label="Two-Factor Authentication (2FA)" hint="Require SMS or Authenticator on login">
-        <Toggle value={preferences.twoFactorEnabled !== false} onChange={v => {
-          updatePreference('twoFactorEnabled', v);
-          toast.success(v ? '2FA Enabled!' : '2FA Disabled');
-        }} />
+        <Toggle value={preferences.twoFactorEnabled !== false} onChange={toggleTwoFactor} />
       </SettingRow>
       <SettingRow label="Last Active Visibility">
         <Select value={preferences.lastActiveVisibility || 'everyone'} onChange={v => updatePreference('lastActiveVisibility', v)} options={[['everyone','Everyone'],['teachers','Only Teachers'],['none','No One']]} />
@@ -379,6 +388,66 @@ function ProfileSettings() {
   };
 
   const initials = (profile?.name || 'U').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const shareProfileCard = async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1080;
+    canvas.height = 1350;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const grad = ctx.createLinearGradient(0, 0, 1080, 1350);
+    grad.addColorStop(0, '#1E3A8A');
+    grad.addColorStop(1, '#0F172A');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 1080, 1350);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(80, 80, 920, 1190);
+
+    ctx.fillStyle = '#F59E0B';
+    ctx.beginPath();
+    ctx.arc(220, 260, 90, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#0F172A';
+    ctx.font = '700 72px Arial';
+    ctx.fillText(initials, 175, 285);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 60px Arial';
+    ctx.fillText(profile?.name || 'User', 340, 255);
+    ctx.font = '400 36px Arial';
+    ctx.fillText(`${profile?.department || ''} • Year ${profile?.year || ''} • Sec ${profile?.section || ''}`, 340, 320);
+
+    ctx.font = '600 34px Arial';
+    ctx.fillText(`Role: ${(profile?.role || 'student').toUpperCase()}`, 140, 430);
+    ctx.fillText(`Register No: ${profile?.registerNumber || '—'}`, 140, 500);
+    ctx.fillText(`Email: ${profile?.email || '—'}`, 140, 570);
+
+    ctx.font = '700 42px Arial';
+    ctx.fillText('KingstonConnect Profile Card', 140, 700);
+    ctx.font = '400 28px Arial';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillText('Share this card with faculty and classmates', 140, 750);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) return;
+    const file = new File([blob], `profile-card-${profile?.id || 'user'}.png`, { type: 'image/png' });
+    const profileLink = `${window.location.origin}/profile/${profile.id}`;
+
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ title: 'My KingstonConnect Profile', text: profileLink, files: [file] });
+      return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    URL.revokeObjectURL(url);
+    await navigator.clipboard.writeText(profileLink);
+    toast.success('Profile card downloaded and link copied');
+  };
 
   return (
     <div className="card" style={{ padding: 'var(--space-5)' }}>
@@ -422,11 +491,7 @@ function ProfileSettings() {
         </button>
       </div>
       <div style={{ marginTop: 'var(--space-3)' }}>
-        <button className="btn btn-secondary btn-full" onClick={() => {
-          const profileLink = `${window.location.origin}/profile/${profile.id}`;
-          navigator.clipboard.writeText(`Check out my KingstonConnect profile!\nName: ${profile.name}\nDept: ${profile.department}\n${profileLink}`);
-          toast.success('Profile card link copied to clipboard!');
-        }}>
+        <button className="btn btn-secondary btn-full" onClick={shareProfileCard}>
           🔗 Share Profile Card
         </button>
       </div>

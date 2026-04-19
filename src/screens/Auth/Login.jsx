@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function Login() {
-  const { loginWithEmail, resetPassword, requestPhoneOtp, verifyPhoneOtp } = useAuth();
+  const { loginWithEmail, requestPhoneOtp, verifyPhoneOtp } = useAuth();
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('+91');
   const [password, setPassword] = useState('');
@@ -36,31 +36,7 @@ export default function Login() {
           <p className="auth-subtitle">Your College, Smarter.</p>
         </div>
 
-        {tab === 'reset' ? (
-          <form onSubmit={async (e) => {
-            e.preventDefault();
-            if (!email) return toast.error('Enter your email');
-            setLoading(true);
-            try {
-              await resetPassword(email);
-              toast.success('Password reset email sent!');
-              setTab('email');
-            } catch (err) {
-              toast.error(err.message);
-            } finally {
-              setLoading(false);
-            }
-          }} className="auth-form">
-            <div className="form-group">
-              <label className="form-label">College Email</label>
-              <input className="form-input" type="email" placeholder="you@kec.edu.in" value={email} onChange={e => setEmail(e.target.value)} required />
-            </div>
-            <button className="btn btn-primary btn-full btn-lg" disabled={loading} type="submit">
-              {loading ? <span className="spinner" /> : 'Send Reset Link'}
-            </button>
-            <button type="button" className="btn btn-ghost btn-full" onClick={() => setTab('email')}>Back to Login</button>
-          </form>
-        ) : tab === 'phone' ? (
+        {tab === 'phone' ? (
           <form onSubmit={async (e) => {
             e.preventDefault();
             setLoading(true);
@@ -129,11 +105,9 @@ export default function Login() {
         </form>
         )}
 
-        {tab !== 'reset' && (
+        {true && (
           <div style={{ textAlign: 'center', marginTop: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTab('reset')} style={{ alignSelf: 'center' }}>
-              Forgot password?
-            </button>
+            <Link to="/reset-password" className="btn btn-ghost btn-sm" style={{ alignSelf: 'center' }}>Forgot password?</Link>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTab('phone')} style={{ alignSelf: 'center' }}>
               Sign in with Phone OTP
             </button>

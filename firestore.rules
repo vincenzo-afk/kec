@@ -12,6 +12,15 @@ service cloud.firestore {
     function isHod() { return isApproved() && role() in ['hod', 'principal']; }
     function isTeacher() { return isApproved() && role() in ['teacher', 'hod', 'principal']; }
     function isStudent() { return isApproved() && role() == 'student'; }
+    function userById(id) { return get(/databases/$(database)/documents/users/$(id)); }
+    function sameDept(a, b) { return userById(a).data.department == userById(b).data.department; }
+    function canCrossDept(id) {
+      return !(userById(id).data.preferences.crossDepartmentChat == false);
+    }
+    function canPostAchievement() {
+      return !('lastAchievementAt' in userDoc().data) ||
+        request.time > userDoc().data.lastAchievementAt + duration.value(5, 'm');
+    }
 
     // ── Users ─────────────────────────────────────────────────────
     match /users/{userId} {
@@ -41,13 +50,35 @@ service cloud.firestore {
     // ── Announcements ─────────────────────────────────────────────
     match /announcements/{announcementId} {
       allow read: if isApproved();
-      allow write: if isTeacher();
+      allow create: if isTeacher();
+      allow update: if
+        isTeacher() ||
+        (
+          isApproved() &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['readBy']) &&
+          request.resource.data.readBy.hasAll(resource.data.readBy) &&
+          uid() in request.resource.data.readBy
+        );
+      allow delete: if isTeacher();
     }
 
     // ── Calendar ──────────────────────────────────────────────────
     match /calendar/{eventId} {
       allow read: if isApproved();
-      allow write: if isApproved(); // personal events allowed for all
+      allow create: if isApproved() && (
+        request.resource.data.visibility == 'personal' ||
+        (request.resource.data.visibility == 'section' && isTeacher()) ||
+        (request.resource.data.visibility == 'public' && isHod())
+      );
+      allow update: if
+        isTeacher() ||
+        (
+          isApproved() &&
+          resource.data.createdBy == uid() &&
+          resource.data.visibility == 'personal' &&
+          request.resource.data.visibility == 'personal'
+        );
+      allow delete: if isTeacher() || (isApproved() && resource.data.createdBy == uid() && resource.data.visibility == 'personal');
     }
 
     // ── Timetable ─────────────────────────────────────────────────
@@ -57,17 +88,37 @@ service cloud.firestore {
     }
 
     // ── P2P Chat ──────────────────────────────────────────────────
-    match /chats/p2p/{chatId}/messages/{msgId} {
-      allow read, write: if isApproved() &&
-        (resource == null || resource.data.senderId == uid() || resource.data.receiverId == uid());
+    match /p2pChats/{chatId}/messages/{msgId} {
+      allow read: if isApproved() &&
+        (resource.data.senderId == uid() || resource.data.receiverId == uid());
+      allow create: if isApproved() &&
+        request.resource.data.senderId == uid() &&
+        (
+          canCrossDept(request.resource.data.senderId) ||
+          canCrossDept(request.resource.data.receiverId) ||
+          sameDept(request.resource.data.senderId, request.resource.data.receiverId)
+        );
+      allow update: if isApproved() &&
+        (resource.data.senderId == uid() || resource.data.receiverId == uid());
+    }
+    match /p2pMeta/{chatId} {
+      allow read: if isApproved() && uid() in resource.data.members;
+      allow create: if isApproved() &&
+        uid() in request.resource.data.members &&
+        request.resource.data.members.size() == 2;
+      allow update: if isApproved() &&
+        uid() in resource.data.members &&
+        request.resource.data.members == resource.data.members &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'unreadBy']);
     }
 
     // ── Group Chat ────────────────────────────────────────────────
-    match /chats/groups/{groupId} {
-      allow read: if isApproved();
+    match /groupChats/{groupId} {
+      allow read: if isApproved() && uid() in resource.data.members;
       allow write: if isTeacher();
       match /messages/{msgId} {
-        allow read, write: if isApproved();
+        allow read, write: if isApproved() &&
+          uid() in get(/databases/$(database)/documents/groupChats/$(groupId)).data.members;
       }
     }
 
@@ -82,7 +133,17 @@ service cloud.firestore {
     // ── Achievements ──────────────────────────────────────────────
     match /achievements/{achievementId} {
       allow read: if isApproved();
-      allow create: if isApproved();
+      allow create: if isApproved() &&
+        request.resource.data.postedBy == uid() &&
+        canPostAchievement() &&
+        (
+          (isHod() && request.resource.data.approved == true) ||
+          (!isHod() && request.resource.data.approved == false)
+        ) &&
+        (
+          (isHod() && (request.resource.data.pinned == true || request.resource.data.pinned == false)) ||
+          (!isHod() && request.resource.data.pinned == false)
+        );
       allow update: if isApproved() &&
         (resource.data.postedBy == uid() || isHod());
       allow delete: if isHod();
@@ -92,7 +153,16 @@ service cloud.firestore {
     match /events/{eventId} {
       allow read: if isApproved();
       allow create: if isTeacher();
-      allow update: if isApproved(); // registration
+      allow update: if
+        isTeacher() ||
+        (
+          isApproved() &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['registrations']) &&
+          (
+            (uid() in request.resource.data.registrations) ||
+            (uid() in resource.data.registrations)
+          )
+        );
       allow delete: if isTeacher();
     }
 

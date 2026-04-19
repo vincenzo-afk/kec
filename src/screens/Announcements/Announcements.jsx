@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { orderBy, limit, where } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { db } from '../../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../../firebase';
 import { formatDistanceToNow } from 'date-fns';
@@ -13,6 +15,7 @@ export default function Announcements() {
   const [announcements, setAnnouncements] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', body: '', scope: 'section', pinned: false });
+  const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [expanded, setExpanded] = useState(null);
 
@@ -28,6 +31,13 @@ export default function Announcements() {
     if (!form.title || !form.body) return toast.error('Fill title and body');
     setSaving(true);
     try {
+      let attachmentURL = null;
+      if (file) {
+        const path = `announcements/${profile.id}/${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, path);
+        await uploadBytes(storageRef, file);
+        attachmentURL = await getDownloadURL(storageRef);
+      }
       await addDocument('announcements', {
         title: form.title, body: form.body,
         postedBy: profile.id, posterRole: profile.role,
@@ -35,11 +45,12 @@ export default function Announcements() {
         targetDept: profile.department || null,
         targetYear: profile.year || null,
         targetSection: profile.section || null,
-        readBy: [], attachmentURL: null,
+        readBy: [], attachmentURL,
       });
       toast.success('Announcement posted!');
       setShowForm(false);
       setForm({ title: '', body: '', scope: 'section', pinned: false });
+      setFile(null);
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
   };
@@ -86,6 +97,10 @@ export default function Announcements() {
               </div>
             )}
           </div>
+          <div className="form-group">
+            <label className="form-label">Attachment (optional)</label>
+            <input className="form-input" type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} style={{ padding: '8px' }} />
+          </div>
           <button className="btn btn-primary" type="submit" disabled={saving}>
             {saving ? <><span className="spinner" /> Posting…</> : 'Post Announcement'}
           </button>
@@ -114,9 +129,13 @@ export default function Announcements() {
 function AnnouncementCard({ a, profile, expanded, setExpanded }) {
   const isExpanded = expanded === a.id;
   const isUnread = !a.readBy?.includes(profile?.id);
+  const markRead = async () => {
+    if (!isUnread || !profile?.id || !a?.id) return;
+    await updateDoc(doc(db, 'announcements', a.id), { readBy: arrayUnion(profile.id) }).catch(() => {});
+  };
 
   return (
-    <div className="card" onClick={() => setExpanded(isExpanded ? null : a.id)} style={{
+    <div className="card" onClick={() => { setExpanded(isExpanded ? null : a.id); markRead(); }} style={{
       padding: 'var(--space-4)', cursor: 'pointer',
       borderLeft: isUnread ? '3px solid var(--color-primary)' : '3px solid transparent',
       transition: 'all 0.2s',
@@ -133,7 +152,17 @@ function AnnouncementCard({ a, profile, expanded, setExpanded }) {
         {a.posterRole} · {a.timestamp?.toDate ? formatDistanceToNow(a.timestamp.toDate(), { addSuffix: true }) : ''}
       </p>
       {isExpanded && (
-        <p className="text-sm" style={{ marginTop: 8, lineHeight: 1.7, color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap' }}>{a.body}</p>
+        <div>
+          <p className="text-sm" style={{ marginTop: 8, lineHeight: 1.7, color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap' }}>{a.body}</p>
+          {a.attachmentURL && (
+            <div style={{ marginTop: 10 }}>
+              {a.attachmentURL.toLowerCase().includes('.pdf') || a.attachmentURL.includes('application%2Fpdf')
+                ? <iframe src={a.attachmentURL} title="Announcement attachment" style={{ width: '100%', height: 320, border: '1px solid var(--color-border)', borderRadius: 8 }} />
+                : <img src={a.attachmentURL} alt="Announcement attachment" style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid var(--color-border)' }} />
+              }
+            </div>
+          )}
+        </div>
       )}
       {!isExpanded && (
         <p className="text-xs text-muted truncate">{a.body}</p>

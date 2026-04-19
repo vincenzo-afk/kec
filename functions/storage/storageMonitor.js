@@ -9,7 +9,7 @@ const messaging = getMessaging();
 
 const THRESHOLD_MB = parseInt(process.env.STORAGE_THRESHOLD_MB || '4096'); // 4 GB default
 
-exports.storageMonitor = onSchedule('every 6 hours', async (event) => {
+async function checkStorage() {
   const bucket = storage.bucket();
   const [files] = await bucket.getFiles();
 
@@ -62,4 +62,12 @@ exports.storageMonitor = onSchedule('every 6 hours', async (event) => {
       await messaging.send({ token, notification: { title: '💾 Storage Warning', body: `Storage is at ${usedMB} MB (${Math.round(usedMB / THRESHOLD_MB * 100)}% of threshold)` } });
     }
   }
+}
+
+exports.storageMonitorScheduled = onSchedule('every 6 hours', () => checkStorage());
+const { onCall } = require('firebase-functions/v2/https');
+exports.storageMonitor = onCall(async (request) => {
+  if (!request.auth) throw new Error('Unauthenticated');
+  await checkStorage();
+  return { success: true };
 });

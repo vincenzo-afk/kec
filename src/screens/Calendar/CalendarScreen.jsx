@@ -25,9 +25,18 @@ export default function CalendarScreen() {
 
   const days = eachDayOfInterval({ start: startOfMonth(month), end: endOfMonth(month) });
 
+  const canViewEvent = (e) => {
+    if (!profile) return false;
+    if (e.visibility === 'public') return true;
+    if (e.visibility === 'section') {
+      return e.targetDept === profile.department && e.targetSection === profile.section;
+    }
+    return e.createdBy === profile.id;
+  };
+
   const eventsForDay = (day) => {
     const ds = format(day, 'yyyy-MM-dd');
-    return events.filter(e => e.date === ds && filter[e.type]);
+    return events.filter(e => e.date === ds && filter[e.type] && canViewEvent(e));
   };
 
   const selectedDayEvents = selected ? eventsForDay(selected) : [];
@@ -42,6 +51,8 @@ export default function CalendarScreen() {
         ...form,
         date: format(selected, 'yyyy-MM-dd'),
         createdBy: profile.id,
+        targetDept: profile.department || null,
+        targetSection: profile.section || null,
         endDate: null,
         relatedEventId: null,
       });

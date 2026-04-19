@@ -3,7 +3,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { orderBy, limit, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, storage } from '../../firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -12,17 +13,20 @@ const CAT_ICONS  = { certification: '🏅', competition: '🏆', project: '💡'
 
 export default function AchievementBoard() {
   const { profile, isHod } = useAuth();
-  const { subscribe, addDocument } = useFirestore();
+  const { subscribe, addDocument, deleteDocument } = useFirestore();
   const [posts, setPosts] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', category: 'certification', description: '', externalLink: '' });
+  const [file, setFile] = useState(null);
   const [filter, setFilter] = useState('all');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('achievements', [orderBy('pinned', 'desc'), orderBy('timestamp', 'desc'), limit(50)], setPosts);
-  }, [profile]);
+    return subscribe('achievements', [orderBy('pinned', 'desc'), orderBy('timestamp', 'desc'), limit(50)], (rows) => {
+      setPosts(rows.filter((r) => r.approved !== false || isHod || r.postedBy === profile.id));
+    });
+  }, [profile, isHod, subscribe]);
 
   const setF = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
 
@@ -31,17 +35,25 @@ export default function AchievementBoard() {
     if (!form.title || !form.description) return toast.error('Fill title and description');
     setSaving(true);
     try {
+      let imageURL = null;
+      if (file) {
+        const path = `achievements/${profile.id}/${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, path);
+        await uploadBytes(storageRef, file);
+        imageURL = await getDownloadURL(storageRef);
+      }
       await addDocument('achievements', {
         postedBy: profile.id, posterName: profile.name,
         posterRole: profile.role, department: profile.department,
         title: form.title, description: form.description,
-        category: form.category, imageURL: null,
+        category: form.category, imageURL,
         externalLink: form.externalLink || null,
-        likes: [], pinned: false, approved: true,
+        likes: [], pinned: false, approved: !isHod,
       });
-      toast.success('Achievement posted! 🎉');
+      toast.success(isHod ? 'Achievement posted! 🎉' : 'Achievement submitted for approval');
       setShowForm(false);
       setForm({ title: '', category: 'certification', description: '', externalLink: '' });
+      setFile(null);
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
   };
@@ -56,6 +68,16 @@ export default function AchievementBoard() {
   const togglePin = async (post) => {
     await updateDoc(doc(db, 'achievements', post.id), { pinned: !post.pinned });
     toast.success(post.pinned ? 'Unpinned' : 'Pinned!');
+  };
+
+  const toggleApprove = async (post) => {
+    await updateDoc(doc(db, 'achievements', post.id), { approved: !(post.approved !== false) });
+  };
+
+  const removePost = async (postId) => {
+    if (!window.confirm('Delete this achievement?')) return;
+    await deleteDocument('achievements', postId);
+    toast.success('Deleted');
   };
 
   const filtered = filter === 'all' ? posts : posts.filter(p => p.category === filter);
@@ -88,6 +110,10 @@ export default function AchievementBoard() {
           <div className="form-group">
             <label className="form-label">External Link (optional)</label>
             <input className="form-input" type="url" placeholder="https://certificate-link.com" value={form.externalLink} onChange={setF('externalLink')} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Image (optional)</label>
+            <input className="form-input" type="file" accept="image/*" style={{ padding: '8px' }} onChange={(e) => setFile(e.target.files?.[0] || null)} />
           </div>
           <button className="btn btn-primary" type="submit" disabled={saving}>
             {saving ? <><span className="spinner" /> Posting…</> : '🌟 Post Achievement'}
@@ -123,6 +149,7 @@ export default function AchievementBoard() {
                 <span className="badge badge-blue">{CAT_ICONS[post.category]} {post.category}</span>
               </div>
               <h3 style={{ fontSize: 'var(--font-size-md)', marginBottom: 8 }}>{post.title}</h3>
+              {post.imageURL && <img src={post.imageURL} alt={post.title} style={{ width: '100%', borderRadius: 8, marginBottom: 10 }} />}
               <p className="text-sm" style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-4)', lineHeight: 1.6 }}>{post.description}</p>
               <div className="flex items-center gap-3">
                 <button onClick={() => toggleLike(post)} className="btn btn-ghost btn-sm" style={{ color: liked ? '#EF4444' : 'var(--color-text-muted)' }}>
@@ -136,9 +163,11 @@ export default function AchievementBoard() {
                   else { navigator.clipboard.writeText(window.location.href); toast.success('Link copied!'); }
                 }} className="btn btn-ghost btn-sm">📤 Share</button>
                 {isHod && (
-                  <button onClick={() => togglePin(post)} className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }}>
-                    {post.pinned ? '📌 Unpin' : '📌 Pin'}
-                  </button>
+                  <>
+                    <button onClick={() => togglePin(post)} className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }}>{post.pinned ? '📌 Unpin' : '📌 Pin'}</button>
+                    <button onClick={() => toggleApprove(post)} className="btn btn-ghost btn-sm">{post.approved !== false ? 'Hide' : 'Approve'}</button>
+                    <button onClick={() => removePost(post.id)} className="btn btn-danger btn-sm">Delete</button>
+                  </>
                 )}
               </div>
             </div>

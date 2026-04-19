@@ -60,13 +60,6 @@ export default function Dashboard() {
     return onSnapshot(q, snap => setUnreadChats(snap.docs.length));
   }, [profile]);
 
-  // Fetch achievement board preview
-  useEffect(() => {
-    if (!profile) return;
-    const unsub = subscribe('achievements', [orderBy('timestamp', 'desc'), limit(2)], setAchievements);
-    return unsub;
-  }, [profile]);
-
   const overallAtt = calcOverallAttendance(attendance);
   const attWarning = profile?.preferences?.showAttendanceWarning && overallAtt !== null && overallAtt < (profile?.preferences?.attendanceWarningThreshold || 75);
 
@@ -108,7 +101,7 @@ export default function Dashboard() {
 
       {/* Stats Row */}
       {!isTeacher && (
-        <div className="dashboard-stats">
+        <div className={`dashboard-stats ${profile?.preferences?.dashboardLayout === 'list' ? 'list' : ''}`}>
           <div className="stat-card">
             <div className="stat-icon" style={{ background: 'var(--color-primary-muted)' }}>📊</div>
             <div>
@@ -136,7 +129,7 @@ export default function Dashboard() {
       )}
       
       {isTeacher && !isHod && !isPrincipal && (
-        <div className="dashboard-stats">
+        <div className={`dashboard-stats ${profile?.preferences?.dashboardLayout === 'list' ? 'list' : ''}`}>
           <div className="stat-card">
             <div className="stat-icon" style={{ background: 'var(--color-warning-muted)' }}>📋</div>
             <div>
@@ -250,6 +243,7 @@ export default function Dashboard() {
 
       <style>{`
         .dashboard-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); margin-bottom: var(--space-6); }
+        .dashboard-stats.list { grid-template-columns: 1fr; }
         .stat-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-4); display: flex; align-items: center; gap: var(--space-3); transition: box-shadow var(--transition-fast); }
         .stat-card:hover { box-shadow: var(--shadow-md); }
         .stat-icon { width: 40px; height: 40px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }

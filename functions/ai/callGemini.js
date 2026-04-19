@@ -93,7 +93,12 @@ async function buildAIContext(userId, options = {}) {
     .get();
   context.announcements = annSnap.docs
     .map(d => d.data())
-    .filter(a => !a.targetSection || a.targetSection === classId)
+    .filter((a) => {
+      if (a.scope === 'college-wide') return true;
+      if (a.scope === 'section') return !a.targetSection || a.targetSection === user.section;
+      if (a.scope === 'department') return !a.targetDept || a.targetDept === user.department;
+      return true;
+    })
     .slice(0, 2)
     .map(a => a.title);
 
@@ -111,7 +116,7 @@ async function buildAIContext(userId, options = {}) {
 exports.callGemini = onCall({ enforceAppCheck: false, timeoutSeconds: 120 }, async (request) => {
   if (!request.auth) throw new Error('Unauthenticated');
   const uid = request.auth.uid;
-  const { message, includeContext = true } = request.data;
+  const { message, includeContext = true, contextPreferences = null } = request.data;
   if (!message) throw new Error('No message provided');
 
   const userSnap = await db.doc(`users/${uid}`).get();
@@ -119,7 +124,11 @@ exports.callGemini = onCall({ enforceAppCheck: false, timeoutSeconds: 120 }, asy
   if (!userData?.encryptedGeminiKey) throw new Error('No API key configured. Set your Gemini key in Settings.');
 
   const apiKey = decrypt(userData.encryptedGeminiKey);
-  const context = includeContext ? await buildAIContext(uid, userData.preferences || {}) : { user: { name: userData.name } };
+  const mergedPrefs = {
+    ...(userData.preferences || {}),
+    ...(contextPreferences || {}),
+  };
+  const context = includeContext ? await buildAIContext(uid, mergedPrefs) : { user: { name: userData.name } };
 
   const personality = context.user?.personality || 'friendly';
   const personalityPrompts = {
@@ -141,7 +150,7 @@ STUDENT CONTEXT:
 
   const messageParts = [{ text: message }];
 
-  if (includeContext && userData.preferences?.includeNotes !== false) {
+  if (includeContext && mergedPrefs?.includeNotes !== false) {
     const pdfParts = await fetchPDFContext(userData);
     if (pdfParts && pdfParts.length > 0) {
       messageParts.push({ text: "\n\nSECTION NOTES (Attached for context):\n" });

@@ -8,8 +8,9 @@ import toast from 'react-hot-toast';
 
 export default function Timetable() {
   const { profile, isTeacher, isHod } = useAuth();
-  const { subscribe, addDocument } = useFirestore();
+  const { subscribe, addDocument, fetchDoc } = useFirestore();
   const [timetables, setTimetables] = useState([]);
+  const [uploaderName, setUploaderName] = useState('');
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [scale, setScale] = useState(1);
@@ -116,6 +117,7 @@ export default function Timetable() {
                 <div className="text-xs text-muted">
                   {current.department} · Year {current.year} · Section {current.section}
                   {current.validFrom && ` · Valid from ${current.validFrom}`}
+                  {uploaderName && ` · Uploaded by ${uploaderName}`}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -128,12 +130,20 @@ export default function Timetable() {
           </div>
 
           <div style={{ overflow: 'auto', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-            <img
-              src={current.imageURL}
-              alt="Timetable"
-              style={{ display: 'block', transform: `scale(${scale})`, transformOrigin: 'top left', transition: 'transform 0.2s', maxWidth: '100%' }}
-              onDoubleClick={() => setScale(1)}
-            />
+            {current.imageURL?.toLowerCase().includes('.pdf') || current.imageURL?.includes('application%2Fpdf') ? (
+              <iframe
+                src={current.imageURL}
+                title="Timetable PDF"
+                style={{ width: '100%', height: '70vh', border: 'none', transform: `scale(${scale})`, transformOrigin: 'top left', transition: 'transform 0.2s' }}
+              />
+            ) : (
+              <img
+                src={current.imageURL}
+                alt="Timetable"
+                style={{ display: 'block', transform: `scale(${scale})`, transformOrigin: 'top left', transition: 'transform 0.2s', maxWidth: '100%' }}
+                onDoubleClick={() => setScale(1)}
+              />
+            )}
           </div>
           <p className="text-xs text-muted" style={{ textAlign: 'center', marginTop: 8 }}>Double-tap to reset zoom</p>
         </div>
@@ -147,3 +157,7 @@ export default function Timetable() {
     </div>
   );
 }
+  useEffect(() => {
+    if (!current?.uploadedBy) return;
+    fetchDoc('users', current.uploadedBy).then((u) => setUploaderName(u?.name || current.uploadedBy)).catch(() => setUploaderName(current.uploadedBy));
+  }, [current?.uploadedBy, fetchDoc]);

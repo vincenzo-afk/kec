@@ -88,6 +88,9 @@ a:hover { text-decoration: underline; }
 }
 .card:hover { box-shadow: var(--shadow-md); }
 .card-elevated { box-shadow: var(--shadow-md); }
+[data-compact='true'] .card { padding: var(--space-3); border-radius: var(--radius-md); }
+[data-compact='true'] .btn { padding: 7px 12px; }
+[data-compact='true'] .page { padding-top: var(--space-4); padding-bottom: var(--space-4); }
 
 /* ── Buttons ── */
 .btn {

@@ -77,6 +77,17 @@ export function AuthProvider({ children }) {
   const logout = () => signOut(auth);
 
   const resetPassword = (email) => sendPasswordResetEmail(auth, email);
+  const requestPhoneOtp = async (phoneNumber, recaptchaContainerId = 'recaptcha-container') => {
+    if (!window.recaptchaVerifier) {
+      window.recaptchaVerifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
+    }
+    return signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
+  };
+
+  const verifyPhoneOtp = async (verificationId, otp) => {
+    const credential = PhoneAuthProvider.credential(verificationId, otp);
+    return signInWithCredential(auth, credential);
+  };
 
   // Derived helpers
   const isApproved = profile?.approvalStatus === 'approved';
@@ -90,6 +101,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider value={{
       user, profile, loading,
       signupWithEmail, loginWithEmail, logout, resetPassword,
+      requestPhoneOtp, verifyPhoneOtp,
       isApproved, isPending, role, isTeacher, isHod, isPrincipal,
     }}>
       {children}

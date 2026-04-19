@@ -24,6 +24,7 @@ import AchievementBoard from './screens/AchievementBoard/AchievementBoard';
 import EventRegistration from './screens/EventRegistration/EventRegistration';
 import Settings from './screens/Settings/Settings';
 import AdminPanel from './screens/AdminPanel/AdminPanel';
+import NotesUpload from './screens/NotesUpload/NotesUpload';
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
@@ -103,6 +104,7 @@ export default function App() {
         <Route path="leave" element={<LeaveApplication />} />
         <Route path="achievements" element={<AchievementBoard />} />
         <Route path="events" element={<EventRegistration />} />
+        <Route path="notes" element={<NotesUpload />} />
         <Route path="settings" element={<Settings />} />
         <Route path="settings/:section" element={<Settings />} />
         <Route path="admin" element={

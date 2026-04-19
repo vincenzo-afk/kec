@@ -20,6 +20,7 @@ const navGroups = [
       { to: '/results', icon: '🏆', label: 'Results' },
       { to: '/timetable', icon: '📅', label: 'Timetable' },
       { to: '/calendar', icon: '🗓️', label: 'Calendar' },
+      { to: '/notes', icon: '📝', label: 'Notes Upload' },
     ],
   },
   {

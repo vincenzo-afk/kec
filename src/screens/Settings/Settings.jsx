@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NavLink, Outlet, Routes, Route, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { usePreferences } from '../../hooks/usePreferences';
@@ -18,11 +18,15 @@ const SECTIONS = [
   { id: 'chat',         icon: '💬', label: 'Chat' },
   { id: 'privacy',      icon: '🔒', label: 'Privacy & Security' },
   { id: 'profile',      icon: '👤', label: 'Profile' },
+  { id: 'staff',        icon: '🧑‍🏫', label: 'Staff Extras', roles: ['teacher', 'hod', 'principal'] },
+  { id: 'admin',        icon: '🛡️', label: 'Admin Controls', roles: ['principal'] },
 ];
 
 export default function Settings() {
+  const { role } = useAuth();
   const { section = 'appearance' } = useParams();
   const navigate = useNavigate();
+  const visibleSections = SECTIONS.filter((s) => !s.roles || s.roles.includes(role));
 
   return (
     <div className="page animate-fade" style={{ maxWidth: 720 }}>
@@ -30,7 +34,7 @@ export default function Settings() {
       <div style={{ display: 'flex', gap: 'var(--space-5)', alignItems: 'flex-start' }}>
         {/* Sidebar nav */}
         <div style={{ width: 180, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {SECTIONS.map(s => (
+          {visibleSections.map(s => (
             <button
               key={s.id}
               onClick={() => navigate(`/settings/${s.id}`)}
@@ -60,7 +64,9 @@ export default function Settings() {
           {section === 'chat'          && <ChatSettings />}
           {section === 'privacy'       && <PrivacySettings />}
           {section === 'profile'       && <ProfileSettings />}
-          {!SECTIONS.find(s => s.id === section) && <AppearanceSettings />}
+          {section === 'staff'         && <StaffSettings />}
+          {section === 'admin'         && <AdminSettings />}
+          {!visibleSections.find(s => s.id === section) && <AppearanceSettings />}
         </div>
       </div>
     </div>
@@ -106,12 +112,13 @@ function Select({ value, onChange, options }) {
 
 /* ── Appearance ── */
 function AppearanceSettings() {
-  const { theme, setTheme, accentColor, setAccentColor, fontSize, setFontSize } = useTheme();
-  const { updatePreferences } = usePreferences();
+  const { theme, setTheme, accentColor, setAccentColor, fontSize, setFontSize, compactMode, setCompactMode } = useTheme();
+  const { preferences, updatePreference } = usePreferences();
 
-  const applyTheme = (t) => { setTheme(t); updatePreferences({ theme: t }); };
-  const applyAccent = (c) => { setAccentColor(c); updatePreferences({ accentColor: c }); };
-  const applyFontSize = (s) => { setFontSize(s); updatePreferences({ fontSize: s }); };
+  const applyTheme = (t) => { setTheme(t); updatePreference('theme', t); };
+  const applyAccent = (c) => { setAccentColor(c); updatePreference('accentColor', c); };
+  const applyFontSize = (s) => { setFontSize(s); updatePreference('fontSize', s); };
+  const applyCompact = (v) => { setCompactMode(v); updatePreference('compactMode', v); };
 
   const ACCENTS = ['#F59E0B','#3B82F6','#10B981','#8B5CF6','#EF4444','#EC4899','#06B6D4','#F97316'];
 
@@ -133,6 +140,12 @@ function AppearanceSettings() {
           ))}
           <input type="color" value={accentColor} onChange={e => applyAccent(e.target.value)} title="Custom color" style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0 }} />
         </div>
+      </SettingRow>
+      <SettingRow label="Compact Mode" hint="Tighter spacing and controls">
+        <Toggle value={compactMode === true} onChange={applyCompact} />
+      </SettingRow>
+      <SettingRow label="Dashboard Layout" hint="Choose between cards or list layout">
+        <Select value={preferences.dashboardLayout || 'grid'} onChange={(v) => updatePreference('dashboardLayout', v)} options={[['grid','Grid'],['list','List']]} />
       </SettingRow>
     </div>
   );
@@ -271,6 +284,39 @@ function ChatSettings() {
       <SettingRow label="Show Online Status">
         <Toggle value={preferences.showOnlineStatus !== false} onChange={v => updatePreference('showOnlineStatus', v)} />
       </SettingRow>
+      <SettingRow label="Image Auto-download">
+        <Toggle value={preferences.imageAutoDownload !== false} onChange={v => updatePreference('imageAutoDownload', v)} />
+      </SettingRow>
+    </div>
+  );
+}
+
+function StaffSettings() {
+  const { preferences, updatePreference } = usePreferences();
+  return (
+    <div className="card" style={{ padding: 'var(--space-5)' }}>
+      <h3 style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--font-size-md)' }}>🧑‍🏫 Staff Settings</h3>
+      <SettingRow label="Allow students to message directly">
+        <Toggle value={preferences.allowStudentP2P !== false} onChange={v => updatePreference('allowStudentP2P', v)} />
+      </SettingRow>
+      <SettingRow label="Show section analytics card on dashboard">
+        <Toggle value={preferences.showSectionAnalytics !== false} onChange={v => updatePreference('showSectionAnalytics', v)} />
+      </SettingRow>
+    </div>
+  );
+}
+
+function AdminSettings() {
+  const { preferences, updatePreference } = usePreferences();
+  return (
+    <div className="card" style={{ padding: 'var(--space-5)' }}>
+      <h3 style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--font-size-md)' }}>🛡️ Admin Controls</h3>
+      <SettingRow label="Allow Cross-Department Chat">
+        <Toggle value={preferences.crossDepartmentChat !== false} onChange={v => updatePreference('crossDepartmentChat', v)} />
+      </SettingRow>
+      <SettingRow label="Enable Test Reminder Notifications">
+        <Toggle value={preferences.testReminderFCM !== false} onChange={v => updatePreference('testReminderFCM', v)} />
+      </SettingRow>
     </div>
   );
 }
@@ -366,6 +412,16 @@ function ProfileSettings() {
         <span className="text-sm text-muted">{profile?.department} · Year {profile?.year} · Sec {profile?.section}</span>
       </SettingRow>
       <div style={{ marginTop: 'var(--space-5)' }}>
+        <button className="btn btn-secondary btn-full" onClick={() => toast.success('Use Forgot password on login screen to reset password')}>
+          🔐 Change Password
+        </button>
+      </div>
+      <div style={{ marginTop: 'var(--space-3)' }}>
+        <button className="btn btn-secondary btn-full" onClick={() => toast.success('Phone number updates are available via OTP login flow')}>
+          📱 Change Phone Number
+        </button>
+      </div>
+      <div style={{ marginTop: 'var(--space-3)' }}>
         <button className="btn btn-secondary btn-full" onClick={() => {
           const profileLink = `${window.location.origin}/profile/${profile.id}`;
           navigator.clipboard.writeText(`Check out my KingstonConnect profile!\nName: ${profile.name}\nDept: ${profile.department}\n${profileLink}`);

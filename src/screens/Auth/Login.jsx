@@ -4,9 +4,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function Login() {
-  const { loginWithEmail, resetPassword } = useAuth();
+  const { loginWithEmail, resetPassword, requestPhoneOtp, verifyPhoneOtp } = useAuth();
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('+91');
   const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [verificationId, setVerificationId] = useState('');
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('email');
 
@@ -57,6 +60,40 @@ export default function Login() {
             </button>
             <button type="button" className="btn btn-ghost btn-full" onClick={() => setTab('email')}>Back to Login</button>
           </form>
+        ) : tab === 'phone' ? (
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            setLoading(true);
+            try {
+              if (!verificationId) {
+                const confirmationResult = await requestPhoneOtp(phone, 'recaptcha-container');
+                setVerificationId(confirmationResult.verificationId);
+                toast.success('OTP sent to your phone');
+              } else {
+                await verifyPhoneOtp(verificationId, otp);
+              }
+            } catch (err) {
+              toast.error(err.message);
+            } finally {
+              setLoading(false);
+            }
+          }} className="auth-form">
+            <div className="form-group">
+              <label className="form-label">Phone Number</label>
+              <input className="form-input" type="tel" placeholder="+919876543210" value={phone} onChange={e => setPhone(e.target.value)} required />
+            </div>
+            {verificationId && (
+              <div className="form-group">
+                <label className="form-label">OTP</label>
+                <input className="form-input" placeholder="6-digit code" value={otp} onChange={e => setOtp(e.target.value)} required />
+              </div>
+            )}
+            <div id="recaptcha-container" />
+            <button className="btn btn-primary btn-full btn-lg" disabled={loading} type="submit">
+              {loading ? <span className="spinner" /> : verificationId ? 'Verify OTP' : 'Send OTP'}
+            </button>
+            <button type="button" className="btn btn-ghost btn-full" onClick={() => { setTab('email'); setVerificationId(''); setOtp(''); }}>Back to Login</button>
+          </form>
         ) : (
         <form onSubmit={handleSubmit} className="auth-form">
           <div className="form-group">
@@ -96,6 +133,9 @@ export default function Login() {
           <div style={{ textAlign: 'center', marginTop: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTab('reset')} style={{ alignSelf: 'center' }}>
               Forgot password?
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTab('phone')} style={{ alignSelf: 'center' }}>
+              Sign in with Phone OTP
             </button>
             <Link to="/signup" className="text-sm text-primary-color font-semibold">
               New here? Create an account →

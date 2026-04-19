@@ -55,7 +55,15 @@ export default function StudyGPT() {
     setInput('');
 
     try {
-      const result = await callGemini(q, { includeContext: useContext });
+      const result = await callGemini(q, {
+        includeContext: useContext,
+        contextPreferences: {
+          includeAttendance: profile?.preferences?.includeAttendance !== false,
+          includeResults: profile?.preferences?.includeResults !== false,
+          includeCalendar: profile?.preferences?.includeCalendar !== false,
+          includeNotes: profile?.preferences?.includeNotes !== false,
+        },
+      });
       const aiMsg = { id: Date.now().toString() + '_ai', role: 'ai', content: result?.reply || 'Sorry, I could not get a response. Try again.' };
       setMessages(m => [...m, aiMsg]);
     } catch (e) {

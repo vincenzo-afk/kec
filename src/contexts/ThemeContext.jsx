@@ -8,6 +8,7 @@ export function ThemeProvider({ children }) {
   const [theme, setThemeState] = useState('system');
   const [accentColor, setAccentColorState] = useState('#F59E0B');
   const [fontSize, setFontSizeState] = useState('medium');
+  const [compactMode, setCompactModeState] = useState(false);
 
   // Sync from user preferences when profile loads
   useEffect(() => {
@@ -15,6 +16,7 @@ export function ThemeProvider({ children }) {
       setThemeState(profile.preferences.theme || 'system');
       setAccentColorState(profile.preferences.accentColor || '#F59E0B');
       setFontSizeState(profile.preferences.fontSize || 'medium');
+      setCompactModeState(profile.preferences.compactMode || false);
     }
   }, [profile]);
 
@@ -45,13 +47,17 @@ export function ThemeProvider({ children }) {
     document.documentElement.style.fontSize = sizes[fontSize] || '16px';
   }, [fontSize]);
 
+  useEffect(() => {
+    document.documentElement.setAttribute('data-compact', compactMode ? 'true' : 'false');
+  }, [compactMode]);
+
   const resolvedTheme = (() => {
     if (theme !== 'system') return theme;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   })();
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme: setThemeState, resolvedTheme, accentColor, setAccentColor: setAccentColorState, fontSize, setFontSize: setFontSizeState }}>
+    <ThemeContext.Provider value={{ theme, setTheme: setThemeState, resolvedTheme, accentColor, setAccentColor: setAccentColorState, fontSize, setFontSize: setFontSizeState, compactMode, setCompactMode: setCompactModeState }}>
       {children}
     </ThemeContext.Provider>
   );

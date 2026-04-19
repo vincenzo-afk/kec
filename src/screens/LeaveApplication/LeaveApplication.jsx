@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { where, orderBy, limit } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '../../firebase';
 import { formatDistanceToNow, differenceInDays, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -9,9 +11,9 @@ const STATUS_COLORS = { pending: 'badge-gold', approved: 'badge-green', rejected
 const LEAVE_TYPES = ['medical', 'personal', 'event', 'other'];
 
 export default function LeaveApplication() {
-  const { profile, isTeacher } = useAuth();
+  const { profile, isTeacher, isHod } = useAuth();
   return isTeacher
-    ? <TeacherLeavePanel profile={profile} />
+    ? <TeacherLeavePanel profile={profile} isHod={isHod} />
     : <StudentLeavePanel profile={profile} />;
 }
 
@@ -20,6 +22,7 @@ function StudentLeavePanel({ profile }) {
   const [leaves, setLeaves] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ fromDate: '', toDate: '', type: 'medical', reason: '' });
+  const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -36,6 +39,13 @@ function StudentLeavePanel({ profile }) {
     if (days < 1) return toast.error('End date must be after start date');
     setSaving(true);
     try {
+      let attachmentURL = null;
+      if (file) {
+        const path = `leave-attachments/${profile.id}/${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, path);
+        await uploadBytes(storageRef, file);
+        attachmentURL = await getDownloadURL(storageRef);
+      }
       await addDocument('leaveApplications', {
         studentId: profile.id,
         teacherId: '',
@@ -44,11 +54,12 @@ function StudentLeavePanel({ profile }) {
         reason: form.reason, type: form.type,
         status: 'pending', daysCount: days,
         reviewedAt: null, reviewedBy: null, reviewNote: null,
-        attachmentURL: null, autoReflected: false,
+        attachmentURL, autoReflected: false,
       });
       toast.success('Leave application submitted!');
       setShowForm(false);
       setForm({ fromDate: '', toDate: '', type: 'medical', reason: '' });
+      setFile(null);
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
   };
@@ -85,6 +96,10 @@ function StudentLeavePanel({ profile }) {
             <label className="form-label">Reason</label>
             <textarea className="form-textarea" placeholder="Explain your reason for leave…" value={form.reason} onChange={setF('reason')} required />
           </div>
+          <div className="form-group">
+            <label className="form-label">Attachment (optional)</label>
+            <input className="form-input" type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} style={{ padding: '8px' }} />
+          </div>
           <button className="btn btn-primary" type="submit" disabled={saving}>
             {saving ? <><span className="spinner" /> Submitting…</> : 'Submit Application'}
           </button>
@@ -106,6 +121,7 @@ function StudentLeavePanel({ profile }) {
               <span className="text-xs text-muted">{l.daysCount} day{l.daysCount !== 1 ? 's' : ''}</span>
             </div>
             <p className="text-sm" style={{ marginTop: 8, color: 'var(--color-text-secondary)' }}>{l.reason}</p>
+            {l.attachmentURL && <a href={l.attachmentURL} target="_blank" rel="noreferrer" className="text-xs text-primary-color">View attachment</a>}
             {l.reviewNote && (
               <div style={{ marginTop: 8, background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)', padding: 'var(--space-2) var(--space-3)' }}>
                 <span className="text-xs text-muted">Review note: </span>
@@ -119,7 +135,7 @@ function StudentLeavePanel({ profile }) {
   );
 }
 
-function TeacherLeavePanel({ profile }) {
+function TeacherLeavePanel({ profile, isHod }) {
   const { subscribe, updateDocument } = useFirestore();
   const [leaves, setLeaves] = useState([]);
   const [reviewNote, setReviewNote] = useState({});
@@ -167,6 +183,7 @@ function TeacherLeavePanel({ profile }) {
               </div>
               <p className="text-xs text-muted" style={{ marginBottom: 4 }}>{l.fromDate} → {l.toDate}</p>
               <p className="text-sm" style={{ marginBottom: 'var(--space-3)', color: 'var(--color-text-secondary)' }}>{l.reason}</p>
+              {l.attachmentURL && <a href={l.attachmentURL} target="_blank" rel="noreferrer" className="text-xs text-primary-color">View attachment</a>}
               <input className="form-input" placeholder="Optional review note…" value={reviewNote[l.id] || ''} onChange={e => setReviewNote(r => ({ ...r, [l.id]: e.target.value }))} style={{ marginBottom: 'var(--space-2)' }} />
               <div className="flex gap-2">
                 <button className="btn btn-primary flex-1" onClick={() => decide(l.id, 'approved')} disabled={processing[l.id]}>✅ Approve</button>
@@ -186,6 +203,12 @@ function TeacherLeavePanel({ profile }) {
                 <span className="text-sm">{l.fromDate} → {l.toDate} · {l.type}</span>
                 <span className={`badge ${STATUS_COLORS[l.status]}`}>{l.status}</span>
               </div>
+              {isHod && (
+                <div className="flex gap-2" style={{ marginTop: 8 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => decide(l.id, 'approved')}>Override → Approve</button>
+                  <button className="btn btn-danger btn-sm" onClick={() => decide(l.id, 'rejected')}>Override → Reject</button>
+                </div>
+              )}
             </div>
           ))}
         </div>

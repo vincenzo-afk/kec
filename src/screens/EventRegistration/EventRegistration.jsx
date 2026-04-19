@@ -13,10 +13,11 @@ const CAT_ICONS  = { workshop: '🔧', symposium: '🎓', seminar: '🎤', cultu
 
 export default function EventRegistration() {
   const { profile, isTeacher } = useAuth();
-  const { subscribe, addDocument } = useFirestore();
+  const { subscribe, addDocument, updateDocument } = useFirestore();
   const [events, setEvents] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', category: 'workshop', date: '', time: '', venue: '', maxCapacity: '', registrationDeadline: '', scope: 'section' });
+  const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [registering, setRegistering] = useState({});
 
@@ -32,7 +33,7 @@ export default function EventRegistration() {
     if (!form.title || !form.date || !form.venue) return toast.error('Fill required fields');
     setSaving(true);
     try {
-      await addDocument('events', {
+      const payload = {
         title: form.title, description: form.description, createdBy: profile.id,
         scope: form.scope, date: form.date, time: form.time, venue: form.venue,
         maxCapacity: form.maxCapacity ? Number(form.maxCapacity) : null,
@@ -40,10 +41,17 @@ export default function EventRegistration() {
         category: form.category, registrations: [], status: 'upcoming',
         targetDept: profile.department, targetSection: profile.section,
         attachmentURL: null, calendarEventId: '', createdAt: new Date(),
-      });
-      toast.success('Event created! 🎪');
+      };
+      if (editingId) {
+        await updateDocument('events', editingId, payload);
+        toast.success('Event updated');
+      } else {
+        await addDocument('events', payload);
+        toast.success('Event created! 🎪');
+      }
       setShowForm(false);
       setForm({ title: '', description: '', category: 'workshop', date: '', time: '', venue: '', maxCapacity: '', registrationDeadline: '', scope: 'section' });
+      setEditingId(null);
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
   };
@@ -60,8 +68,56 @@ export default function EventRegistration() {
     finally { setRegistering(r => ({ ...r, [event.id]: false })); }
   };
 
-  const upcoming = events.filter(e => e.status !== 'cancelled' && !isPast(parseISO(e.date)));
-  const past = events.filter(e => isPast(parseISO(e.date)));
+  const editEvent = (event) => {
+    setShowForm(true);
+    setEditingId(event.id);
+    setForm({
+      title: event.title || '',
+      description: event.description || '',
+      category: event.category || 'workshop',
+      date: event.date || '',
+      time: event.time || '',
+      venue: event.venue || '',
+      maxCapacity: event.maxCapacity || '',
+      registrationDeadline: event.registrationDeadline || '',
+      scope: event.scope || 'section',
+    });
+  };
+
+  const cancelEvent = async (eventId) => {
+    if (!window.confirm('Cancel this event?')) return;
+    await updateDocument('events', eventId, { status: 'cancelled' });
+    toast.success('Event cancelled');
+  };
+
+  const exportRegistrations = (event) => {
+    const rows = (event.registrations || []).map((id) => ({ studentId: id, eventTitle: event.title, eventDate: event.date }));
+    if (!rows.length) return toast.error('No registrations');
+    const headers = Object.keys(rows[0]);
+    const csv = [headers.join(','), ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','))].join('\\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${event.title || 'event'}-registrations.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const getEventDate = (e) => {
+    if (!e?.date || typeof e.date !== 'string') return null;
+    const d = parseISO(e.date);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const upcoming = events.filter(e => {
+    if (e.status === 'cancelled') return false;
+    const d = getEventDate(e);
+    return !d || !isPast(d);
+  });
+  const past = events.filter(e => {
+    const d = getEventDate(e);
+    return !!d && isPast(d);
+  });
 
   return (
     <div className="page animate-fade">
@@ -125,7 +181,7 @@ export default function EventRegistration() {
             <textarea className="form-textarea" placeholder="Event details…" value={form.description} onChange={setF('description')} rows={3} />
           </div>
           <button className="btn btn-primary" type="submit" disabled={saving}>
-            {saving ? <><span className="spinner" /> Creating…</> : 'Create Event'}
+            {saving ? <><span className="spinner" /> Saving…</> : editingId ? 'Save Changes' : 'Create Event'}
           </button>
         </form>
       )}
@@ -133,14 +189,14 @@ export default function EventRegistration() {
       {upcoming.length > 0 && (
         <div style={{ marginBottom: 'var(--space-6)' }}>
           <h3 style={{ marginBottom: 'var(--space-3)', fontSize: 'var(--font-size-md)' }}>Upcoming Events</h3>
-          {upcoming.map(ev => <EventCard key={ev.id} ev={ev} profile={profile} onRegister={register} registering={registering} />)}
+          {upcoming.map(ev => <EventCard key={ev.id} ev={ev} profile={profile} onRegister={register} registering={registering} isTeacher={isTeacher} onEdit={editEvent} onCancel={cancelEvent} onExport={exportRegistrations} />)}
         </div>
       )}
 
       {past.length > 0 && (
         <div>
           <h3 style={{ marginBottom: 'var(--space-3)', fontSize: 'var(--font-size-md)', color: 'var(--color-text-muted)' }}>Past Events</h3>
-          {past.map(ev => <EventCard key={ev.id} ev={ev} profile={profile} onRegister={register} registering={registering} past />)}
+          {past.map(ev => <EventCard key={ev.id} ev={ev} profile={profile} onRegister={register} registering={registering} past isTeacher={isTeacher} onEdit={editEvent} onCancel={cancelEvent} onExport={exportRegistrations} />)}
         </div>
       )}
 
@@ -151,7 +207,7 @@ export default function EventRegistration() {
   );
 }
 
-function EventCard({ ev, profile, onRegister, registering, past }) {
+function EventCard({ ev, profile, onRegister, registering, past, isTeacher, onEdit, onCancel, onExport }) {
   const isRegistered = ev.registrations?.includes(profile?.id);
   const spotsLeft = ev.maxCapacity ? ev.maxCapacity - (ev.registrations?.length || 0) : null;
   const isFull = spotsLeft !== null && spotsLeft <= 0 && !isRegistered;
@@ -173,13 +229,22 @@ function EventCard({ ev, profile, onRegister, registering, past }) {
       </div>
       {ev.description && <p className="text-sm" style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-3)' }}>{ev.description}</p>}
       {!past && (
-        <button
-          className={`btn ${isRegistered ? 'btn-secondary' : 'btn-primary'} btn-sm`}
-          onClick={() => onRegister(ev)}
-          disabled={registering[ev.id] || (isFull && !isRegistered)}
-        >
-          {registering[ev.id] ? <span className="spinner" /> : isRegistered ? '✕ Cancel Registration' : isFull ? 'Full' : '✅ Register'}
-        </button>
+        <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+          <button
+            className={`btn ${isRegistered ? 'btn-secondary' : 'btn-primary'} btn-sm`}
+            onClick={() => onRegister(ev)}
+            disabled={registering[ev.id] || (isFull && !isRegistered)}
+          >
+            {registering[ev.id] ? <span className="spinner" /> : isRegistered ? '✕ Cancel Registration' : isFull ? 'Full' : '✅ Register'}
+          </button>
+          {isTeacher && (
+            <>
+              <button className="btn btn-secondary btn-sm" onClick={() => onEdit(ev)}>Edit</button>
+              <button className="btn btn-danger btn-sm" onClick={() => onCancel(ev.id)}>Cancel Event</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => onExport(ev)}>Export List</button>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

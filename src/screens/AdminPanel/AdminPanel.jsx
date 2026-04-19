@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '../../firebase';
-import { collection, onSnapshot, query, orderBy, limit, where, doc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, where, doc, updateDoc, getDocs, startAfter } from 'firebase/firestore';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -36,13 +36,31 @@ export default function AdminPanel() {
 /* ──────── Users Tab ──────── */
 function UsersTab() {
   const [users, setUsers] = useState([]);
+  const [lastDoc, setLastDoc] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [filter, setFilter] = useState({ role: 'all', status: 'all', search: '' });
   const [processing, setProcessing] = useState({});
 
   useEffect(() => {
     const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(200));
-    return onSnapshot(q, snap => setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return onSnapshot(q, snap => {
+      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLastDoc(snap.docs[snap.docs.length - 1] || null);
+    });
   }, []);
+
+  const loadMore = async () => {
+    if (!lastDoc) return;
+    setLoadingMore(true);
+    try {
+      const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(200));
+      const snap = await getDocs(q);
+      setUsers(prev => [...prev, ...snap.docs.map(d => ({ id: d.id, ...d.data() }))]);
+      setLastDoc(snap.docs[snap.docs.length - 1] || null);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const approveUser = async (userId, approvalData) => {
     if (!approvalData.role || !approvalData.department || !approvalData.year || !approvalData.section) {
@@ -107,6 +125,11 @@ function UsersTab() {
         {filtered.length === 0 && <div className="empty-state"><div className="empty-state-icon">👥</div><p>No users found</p></div>}
         {filtered.map(u => <UserCard key={u.id} u={u} onApprove={approveUser} onSuspend={suspendUser} processing={processing[u.id]} />)}
       </div>
+      {lastDoc && (
+        <div style={{ marginTop: 'var(--space-4)', textAlign: 'center' }}>
+          <button className="btn btn-secondary btn-sm" onClick={loadMore} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load More Users'}</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -246,6 +269,7 @@ function StorageTab() {
 /* ──────── Analytics Tab ──────── */
 function AnalyticsTab() {
   const [stats, setStats] = useState({ total: 0, students: 0, teachers: 0, hods: 0, pending: 0 });
+  const [storageInfo, setStorageInfo] = useState(null);
 
   useEffect(() => {
     const q = query(collection(db, 'users'));
@@ -261,12 +285,22 @@ function AnalyticsTab() {
     });
   }, []);
 
+  useEffect(() => onSnapshot(doc(db, 'system', 'storage'), snap => setStorageInfo(snap.exists() ? snap.data() : null)), []);
+
   const cards = [
     ['👥', 'Total Users', stats.total, 'var(--color-primary-muted)', 'var(--color-primary)'],
     ['🎓', 'Students', stats.students, 'var(--color-success-muted)', 'var(--color-success)'],
     ['👨‍🏫', 'Teachers', stats.teachers, 'var(--color-info-muted)', 'var(--color-info)'],
     ['👔', 'HODs', stats.hods, 'var(--color-warning-muted)', 'var(--color-warning)'],
     ['⏳', 'Pending', stats.pending, 'var(--color-danger-muted)', 'var(--color-danger)'],
+  ];
+
+  const health = [
+    ['Firebase Auth', stats.total > 0 ? 'Operational' : 'No data', stats.total > 0 ? 'badge-green' : 'badge-grey'],
+    ['Firestore', stats.total > 0 ? 'Operational' : 'No data', stats.total > 0 ? 'badge-green' : 'badge-grey'],
+    ['Storage', storageInfo?.lastCheckedAt ? 'Operational' : 'Unknown', storageInfo?.lastCheckedAt ? 'badge-green' : 'badge-gold'],
+    ['Cloud Functions', storageInfo?.lastCleanupAt || storageInfo?.lastCheckedAt ? 'Operational' : 'Unknown', storageInfo?.lastCleanupAt || storageInfo?.lastCheckedAt ? 'badge-green' : 'badge-gold'],
+    ['FCM Push', stats.total > 0 ? 'Monitoring' : 'Unknown', stats.total > 0 ? 'badge-blue' : 'badge-grey'],
   ];
 
   return (
@@ -282,7 +316,7 @@ function AnalyticsTab() {
       </div>
       <div className="card" style={{ padding: 'var(--space-5)' }}>
         <h3 style={{ fontSize: 'var(--font-size-md)', marginBottom: 'var(--space-4)' }}>System Health</h3>
-        {[['Firebase Auth', 'Operational', 'badge-green'],['Firestore', 'Operational', 'badge-green'],['Storage', 'Operational', 'badge-green'],['Cloud Functions', 'Operational', 'badge-green'],['FCM Push', 'Operational', 'badge-green']].map(([s, st, b]) => (
+        {health.map(([s, st, b]) => (
           <div key={s} className="flex items-center justify-between" style={{ padding: '10px 0', borderBottom: '1px solid var(--color-border)' }}>
             <span className="text-sm">{s}</span>
             <span className={`badge ${b}`}>{st}</span>
@@ -295,16 +329,72 @@ function AnalyticsTab() {
 
 /* ──────── Reports Tab ──────── */
 function ReportsTab() {
+  const downloadCsv = (filename, rows) => {
+    if (!rows.length) return toast.error('No data to export');
+    const headers = Object.keys(rows[0]);
+    const csv = [
+      headers.join(','),
+      ...rows.map(row => headers.map((h) => `"${String(row[h] ?? '').replace(/"/g, '""')}"`).join(',')),
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const exportLeave = async () => {
     try {
       const fn = httpsCallable(functions, 'exportLeaveReport');
       const result = await fn({});
-      const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'leave-report.json'; a.click();
-      URL.revokeObjectURL(url);
+      downloadCsv('leave-report.csv', result.data.records || []);
       toast.success('Report exported!');
     } catch (e) { toast.error('Export failed: ' + e.message); }
+  };
+
+  const exportEventHeadcount = async () => {
+    try {
+      const snap = await getDocs(query(collection(db, 'events'), orderBy('date', 'asc')));
+      const rows = snap.docs.map(d => {
+        const e = d.data();
+        return {
+          id: d.id,
+          title: e.title,
+          date: e.date,
+          venue: e.venue,
+          category: e.category,
+          status: e.status,
+          registrations: e.registrations?.length || 0,
+          maxCapacity: e.maxCapacity || '',
+        };
+      });
+      downloadCsv('event-headcount-report.csv', rows);
+      toast.success('Event report exported');
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const exportAttendanceSummary = async () => {
+    try {
+      const snap = await getDocs(query(collection(db, 'attendance'), orderBy('date', 'desc'), limit(5000)));
+      const byClass = {};
+      snap.docs.forEach((d) => {
+        const r = d.data();
+        const key = r.classId || 'unknown';
+        if (!byClass[key]) byClass[key] = { classId: key, total: 0, present: 0, absent: 0, leave: 0 };
+        byClass[key].total += 1;
+        if (r.status === 'present') byClass[key].present += 1;
+        if (r.status === 'absent') byClass[key].absent += 1;
+        if (r.status === 'leave') byClass[key].leave += 1;
+      });
+      const rows = Object.values(byClass).map((r) => ({
+        ...r,
+        attendancePct: r.total ? Math.round(((r.present + r.leave) / r.total) * 100) : 0,
+      }));
+      downloadCsv('attendance-summary.csv', rows);
+      toast.success('Attendance summary exported');
+    } catch (e) { toast.error(e.message); }
   };
 
   return (
@@ -324,7 +414,7 @@ function ReportsTab() {
             <div className="font-semibold">Event Headcount Report</div>
             <div className="text-xs text-muted">All events with registration counts</div>
           </div>
-          <button className="btn btn-secondary btn-sm">📥 Export</button>
+          <button className="btn btn-secondary btn-sm" onClick={exportEventHeadcount}>📥 Export</button>
         </div>
       </div>
       <div className="card" style={{ padding: 'var(--space-5)' }}>
@@ -333,7 +423,7 @@ function ReportsTab() {
             <div className="font-semibold">Attendance Summary</div>
             <div className="text-xs text-muted">College-wide attendance report</div>
           </div>
-          <button className="btn btn-secondary btn-sm">📥 Export</button>
+          <button className="btn btn-secondary btn-sm" onClick={exportAttendanceSummary}>📥 Export</button>
         </div>
       </div>
     </div>

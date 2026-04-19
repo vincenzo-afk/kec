@@ -16,6 +16,7 @@ export default function Results() {
 function StudentResults({ profile }) {
   const { subscribe } = useFirestore();
   const [results, setResults] = useState([]);
+  const [rank, setRank] = useState(null);
 
   useEffect(() => {
     if (!profile) return;
@@ -23,7 +24,22 @@ function StudentResults({ profile }) {
       where('classId', '==', `${profile.department}-${profile.year}-${profile.section}`),
       orderBy('createdAt', 'desc'),
     ], setResults);
-  }, [profile]);
+  }, [profile, subscribe]);
+
+  useEffect(() => {
+    if (!profile || !results.length) {
+      setRank(null);
+      return;
+    }
+    const totals = {};
+    results.forEach((r) => {
+      Object.entries(r.marksMap || {}).forEach(([sid, score]) => {
+        totals[sid] = (totals[sid] || 0) + Number(score || 0);
+      });
+    });
+    const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([sid], i) => ({ sid, rank: i + 1 }));
+    setRank(sorted.find((s) => s.sid === profile.id)?.rank || null);
+  }, [profile, results]);
 
   const bySubject = results.reduce((acc, r) => {
     const subj = r.subject;
@@ -35,6 +51,7 @@ function StudentResults({ profile }) {
   return (
     <div className="page animate-fade">
       <div className="page-header"><h2>My Results</h2></div>
+      {rank && <div className="badge badge-gold" style={{ marginBottom: 'var(--space-4)' }}>Class Rank: #{rank}</div>}
 
       {Object.keys(bySubject).length === 0 && (
         <div className="empty-state"><div className="empty-state-icon">🏆</div><p>No results published yet</p></div>
@@ -91,6 +108,7 @@ function StudentResults({ profile }) {
 
 /* ────────── Teacher View ────────── */
 function TeacherResults({ profile }) {
+  const canLockTests = ['hod', 'principal'].includes(profile?.role);
   const { addDocument, subscribe, fetchCollection, updateDocument } = useFirestore();
   const [tests, setTests] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -106,7 +124,7 @@ function TeacherResults({ profile }) {
       where('teacherId', '==', profile.id),
       orderBy('createdAt', 'desc'),
     ], setTests);
-  }, [profile?.id]);
+  }, [profile?.id, subscribe]);
 
   useEffect(() => {
     if (!profile) return;
@@ -123,6 +141,29 @@ function TeacherResults({ profile }) {
     };
     loadStudents();
   }, [profile, fetchCollection]);
+
+  const exportCsv = () => {
+    if (!tests.length) return toast.error('No results to export');
+    const rows = tests.map((t) => ({
+      id: t.id,
+      testName: t.testName,
+      subject: t.subject,
+      classId: t.classId,
+      maxMarks: t.maxMarks,
+      studentsMarked: Object.keys(t.marksMap || {}).length,
+      locked: !!t.lockedBy,
+    }));
+    const headers = Object.keys(rows[0]);
+    const csv = [headers.join(','), ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'results.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Results exported');
+  };
 
   const setF = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
 
@@ -156,9 +197,12 @@ function TeacherResults({ profile }) {
     <div className="page animate-fade">
       <div className="page-header">
         <h2>Results</h2>
-        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? '✕ Cancel' : '+ New Test'}
-        </button>
+        <div className="flex gap-2">
+          {canLockTests && <button className="btn btn-secondary btn-sm" onClick={exportCsv}>Export CSV</button>}
+          <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
+            {showForm ? '✕ Cancel' : '+ New Test'}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -238,7 +282,7 @@ function TeacherResults({ profile }) {
               }} disabled={saving}>
                 {saving ? 'Saving...' : 'Save Marks'}
               </button>
-              {(profile.role === 'hod' || profile.role === 'principal') && (
+              {canLockTests && (
                 <button className="btn btn-danger" onClick={async () => {
                   if (!window.confirm("Are you sure? Locking prevents further edits.")) return;
                   try {
@@ -253,6 +297,7 @@ function TeacherResults({ profile }) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          {canLockTests && <HodResultsMatrix profile={profile} />}
           {tests.map(t => (
             <div key={t.id} className="card" style={{ padding: 'var(--space-4)', cursor: 'pointer' }} onClick={() => { setSelectedTest(t); setMarks({}); }}>
               <div className="flex items-center justify-between">
@@ -272,6 +317,40 @@ function TeacherResults({ profile }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function HodResultsMatrix({ profile }) {
+  const { subscribe } = useFirestore();
+  const [rows, setRows] = useState([]);
+
+  useEffect(() => {
+    if (!profile?.department) return;
+    return subscribe('results', [orderBy('createdAt', 'desc'), limit(500)], (all) => {
+      const dept = all.filter(r => (r.classId || '').startsWith(`${profile.department}-`));
+      const map = {};
+      dept.forEach((r) => {
+        const key = r.classId || 'unknown';
+        if (!map[key]) map[key] = { classId: key, tests: 0, totalPct: 0 };
+        const vals = Object.values(r.marksMap || {});
+        const avg = vals.length ? vals.reduce((s, v) => s + (Number(v || 0) / Number(r.maxMarks || 1)) * 100, 0) / vals.length : 0;
+        map[key].tests += 1;
+        map[key].totalPct += avg;
+      });
+      setRows(Object.values(map).map((r) => ({ ...r, avgPct: r.tests ? Math.round(r.totalPct / r.tests) : 0 })).sort((a, b) => b.avgPct - a.avgPct));
+    });
+  }, [profile?.department, subscribe]);
+
+  if (!rows.length) return null;
+
+  return (
+    <div className="card" style={{ padding: 'var(--space-4)' }}>
+      <div className="font-semibold" style={{ marginBottom: 'var(--space-3)' }}>Department Results Matrix</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr><th align="left">Class</th><th align="left">Tests</th><th align="left">Avg %</th></tr></thead>
+        <tbody>{rows.map((r) => <tr key={r.classId}><td>{r.classId}</td><td>{r.tests}</td><td>{r.avgPct}%</td></tr>)}</tbody>
+      </table>
     </div>
   );
 }

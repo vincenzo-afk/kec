@@ -1,38 +1,47 @@
-import { doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useCallback } from 'react';
 
 /**
- * Hook to update user preferences in Firestore
+ * Hook to update user preferences in Supabase
  */
 export function usePreferences() {
   const { user, profile } = useAuth();
 
   const updatePreference = useCallback(async (key, value) => {
     if (!user) return;
-    const updateObj = { [`preferences.${key}`]: value, lastActive: serverTimestamp() };
+    
+    // In Supabase, preferences is a JSONB column. We need to fetch it first, update the key, then update the DB.
+    // Or we could try using a DB function if we set one up, but for now we'll do read-modify-write.
     try {
-      await updateDoc(doc(db, 'users', user.uid), updateObj);
-    } catch {
-      await setDoc(doc(db, 'users', user.uid), updateObj, { merge: true });
+      const { data, error } = await supabase.from('users').select('preferences').eq('id', user.id).single();
+      if (error) throw error;
+      
+      const newPrefs = { ...(data.preferences || {}), [key]: value };
+      
+      await supabase.from('users').update({ 
+        preferences: newPrefs,
+        lastActive: new Date().toISOString()
+      }).eq('id', user.id);
+    } catch (err) {
+      console.error('Failed to update preference', err);
     }
   }, [user]);
 
   const updatePreferences = useCallback(async (prefs) => {
     if (!user) return;
-    const flattened = Object.entries(prefs || {}).reduce((acc, [k, v]) => {
-      acc[`preferences.${k}`] = v;
-      return acc;
-    }, {});
-    const payload = {
-      ...flattened,
-      lastActive: serverTimestamp(),
-    };
     try {
-      await updateDoc(doc(db, 'users', user.uid), payload);
-    } catch {
-      await setDoc(doc(db, 'users', user.uid), payload, { merge: true });
+      const { data, error } = await supabase.from('users').select('preferences').eq('id', user.id).single();
+      if (error) throw error;
+      
+      const newPrefs = { ...(data.preferences || {}), ...prefs };
+      
+      await supabase.from('users').update({ 
+        preferences: newPrefs,
+        lastActive: new Date().toISOString()
+      }).eq('id', user.id);
+    } catch (err) {
+      console.error('Failed to update preferences', err);
     }
   }, [user]);
 

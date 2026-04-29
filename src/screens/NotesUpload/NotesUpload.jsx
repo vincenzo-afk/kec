@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage, db } from '../../firebase';
-import { useFirestore } from '../../hooks/useFirestore';
-import { useAuth } from '../../contexts/AuthContext';
-import {
-  where, orderBy, limit, doc, updateDoc, increment, serverTimestamp
-} from 'firebase/firestore';
+import { useSupabase } from '../../hooks/useSupabase';
+import { supabase } from '../../supabase';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
 // Increment download count server-side
 async function incrementDownload(noteId) {
   try {
-    await updateDoc(doc(db, 'notes', noteId), { downloadCount: increment(1) });
+    const { data } = await supabase.from('notes').select('downloadCount').eq('id', noteId).single();
+    if (data) {
+      await supabase.from('notes').update({ downloadCount: (data.downloadCount || 0) + 1 }).eq('id', noteId);
+    }
   } catch (_) { /* non-critical */ }
 }
 
@@ -35,7 +33,7 @@ export default function NotesScreen() {
 /* ─── Teacher Upload Form ─── */
 function UploadForm() {
   const { profile } = useAuth();
-  const { addDocument } = useFirestore();
+  const { addDocument } = useSupabase();
   const [subject, setSubject] = useState('');
   const [title, setTitle] = useState('');
   const [file, setFile] = useState(null);
@@ -47,10 +45,11 @@ function UploadForm() {
     if (!file || !subject.trim()) return toast.error('Select a file and enter the subject');
     setUploading(true);
     try {
-      const path = `notes/${profile.department}/${profile.year}/${profile.section}/${Date.now()}_${file.name}`;
-      const sRef = ref(storage, path);
-      await uploadBytes(sRef, file);
-      const url = await getDownloadURL(sRef);
+      const path = `${profile.department}/${profile.year}/${profile.section}/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage.from('notes').upload(path, file);
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from('notes').getPublicUrl(path);
+      const url = data.publicUrl;
       await addDocument('notes', {
         subject: subject.trim(),
         title: title.trim() || file.name,
@@ -63,7 +62,7 @@ function UploadForm() {
         section: profile.section,
         uploadedBy: profile.id,
         uploaderName: profile.name || 'Teacher',
-        uploadedAt: serverTimestamp(),
+        uploadedAt: new Date().toISOString(),
         downloadCount: 0,
       });
       setFile(null); setSubject(''); setTitle(''); setOpen(false);
@@ -110,7 +109,7 @@ function UploadForm() {
 /* ─── Notes List (all users) ─── */
 function NotesList() {
   const { profile } = useAuth();
-  const { subscribe } = useFirestore();
+  const { subscribe } = useSupabase();
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [subject, setSubject] = useState('all');
@@ -131,14 +130,13 @@ function NotesList() {
     }
     
     const constraints = isPrincipal
-      ? [orderBy('uploadedAt', 'desc'), limit(100)]
-      : [
-          where('department', '==', profile.department),
-          where('year', '==', profile.year),
-          where('section', '==', profile.section),
-          orderBy('uploadedAt', 'desc'),
-          limit(100),
-        ];
+      ? q => q.order('uploadedAt', { ascending: false }).limit(100)
+      : q => q
+          .eq('department', profile.department)
+          .eq('year', profile.year)
+          .eq('section', profile.section)
+          .order('uploadedAt', { ascending: false })
+          .limit(100);
     
     return subscribe('notes', constraints, (data) => {
       setNotes(data);
@@ -215,8 +213,8 @@ function NoteCard({ note }) {
             <div className="text-xs text-muted" style={{ marginTop: 2 }}>
               <span className="badge badge-blue" style={{ marginRight: 6 }}>{note.subject}</span>
               {note.uploaderName && <span>{note.uploaderName} · </span>}
-              {note.uploadedAt?.toDate
-                ? formatDistanceToNow(note.uploadedAt.toDate(), { addSuffix: true })
+              {note.uploadedAt
+                ? formatDistanceToNow(new Date(note.uploadedAt), { addSuffix: true })
                 : 'Just now'}
             </div>
             <div className="text-xs text-muted" style={{ marginTop: 2 }}>

@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { orderBy, limit, arrayUnion, arrayRemove, serverTimestamp } from 'firebase/firestore';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { useSupabase } from '../../hooks/useSupabase';
+import { supabase } from '../../supabase';
 import { formatDistanceToNow, isPast, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -13,7 +11,7 @@ const CAT_ICONS  = { workshop: '🔧', symposium: '🎓', seminar: '🎤', cultu
 
 export default function EventRegistration() {
   const { profile, isTeacher } = useAuth();
-  const { subscribe, addDocument, updateDocument } = useFirestore();
+  const { subscribe, addDocument, updateDocument } = useSupabase();
   const [events, setEvents] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', category: 'workshop', date: '', time: '', venue: '', maxCapacity: '', registrationDeadline: '', scope: 'section' });
@@ -23,7 +21,7 @@ export default function EventRegistration() {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('events', [orderBy('date', 'asc'), limit(50)], setEvents);
+    return subscribe('events', q => q.order('date', { ascending: true }).limit(50), setEvents);
   }, [profile]);
 
   const setF = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -40,7 +38,7 @@ export default function EventRegistration() {
         registrationDeadline: form.registrationDeadline,
         category: form.category, registrations: [], status: 'upcoming',
         targetDept: profile.department, targetSection: profile.section,
-        attachmentURL: null, calendarEventId: '', createdAt: new Date(),
+        attachmentURL: null, calendarEventId: '', createdAt: new Date().toISOString(),
       };
       if (editingId) {
         await updateDocument('events', editingId, payload);
@@ -61,9 +59,13 @@ export default function EventRegistration() {
     setRegistering(r => ({ ...r, [event.id]: true }));
     try {
       const isJoining = !isRegistered;
-      await updateDoc(doc(db, 'events', event.id), {
-        registrations: isJoining ? arrayUnion(profile.id) : arrayRemove(profile.id),
-      });
+      const newRegistrations = isJoining 
+        ? [...(event.registrations || []), profile.id]
+        : (event.registrations || []).filter(id => id !== profile.id);
+      
+      await supabase.from('events').update({
+        registrations: newRegistrations,
+      }).eq('id', event.id);
       
       // Auto-draft leave application if joining
       if (isJoining && profile.role === 'student') {
@@ -77,7 +79,7 @@ export default function EventRegistration() {
           status: 'pending', daysCount: 1,
           reviewedAt: null, reviewedBy: null, reviewNote: null,
           attachmentURL: null, autoReflected: false,
-          appliedAt: serverTimestamp()
+          appliedAt: new Date().toISOString()
         });
         toast.success(`Registered! Auto-drafted leave for ${event.date} 📋`);
       } else {
@@ -112,8 +114,8 @@ export default function EventRegistration() {
   const exportRegistrations = async (event) => {
     const rows = await Promise.all((event.registrations || []).map(async (id) => {
       try {
-        const snap = await getDoc(doc(db, 'users', id));
-        const u = snap.exists() ? snap.data() : {};
+        const { data: u } = await supabase.from('users').select('*').eq('id', id).single();
+        if (!u) throw new Error('Not found');
         return {
           studentId: id,
           studentName: u.name || '',

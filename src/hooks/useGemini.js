@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { doc, getDoc, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 
 // Central Groq API key
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
@@ -17,8 +16,7 @@ export function useGemini() {
   const [error, setError] = useState(null);
 
   const buildAIContext = useCallback(async (userId, options = {}) => {
-    const userDoc = await getDoc(doc(db, 'users', userId));
-    const userData = userDoc.data();
+    const { data: userData } = await supabase.from('users').select('*').eq('id', userId).single();
     if (!userData) return {};
 
     const classId = `${userData.department}-${userData.year}-${userData.section}`;
@@ -35,33 +33,32 @@ export function useGemini() {
     // Attendance
     if (options.includeAttendance !== false) {
       try {
-        const attSnap = await getDocs(
-          query(
-            collection(db, 'attendance'),
-            where('studentId', '==', userId),
-            orderBy('date', 'desc'),
-            limit(100)
-          )
-        );
-        const records = attSnap.docs.map(d => d.data());
-        const present = records.filter(r => r.status === 'present').length;
-        
-        const subjects = {};
-        records.forEach(r => {
-          if (!subjects[r.subject]) subjects[r.subject] = { total: 0, present: 0 };
-          subjects[r.subject].total++;
-          if (r.status === 'present') subjects[r.subject].present++;
-        });
-        
-        const subjectWise = {};
-        Object.keys(subjects).forEach(s => {
-          subjectWise[s] = Math.round(subjects[s].present / subjects[s].total * 100) + '%';
-        });
+        const { data: records, error } = await supabase.from('attendance')
+          .select('*')
+          .eq('studentId', userId)
+          .order('date', { ascending: false })
+          .limit(100);
+          
+        if (!error && records) {
+          const present = records.filter(r => r.status === 'present').length;
+          
+          const subjects = {};
+          records.forEach(r => {
+            if (!subjects[r.subject]) subjects[r.subject] = { total: 0, present: 0 };
+            subjects[r.subject].total++;
+            if (r.status === 'present') subjects[r.subject].present++;
+          });
+          
+          const subjectWise = {};
+          Object.keys(subjects).forEach(s => {
+            subjectWise[s] = Math.round(subjects[s].present / subjects[s].total * 100) + '%';
+          });
 
-        context.attendance = { 
-          overall: records.length ? Math.round(present / records.length * 100) + '%' : 'N/A', 
-          subjectWise 
-        };
+          context.attendance = { 
+            overall: records.length ? Math.round(present / records.length * 100) + '%' : 'N/A', 
+            subjectWise 
+          };
+        }
       } catch (e) {
         console.warn('[AI] Failed to load attendance:', e);
       }
@@ -70,19 +67,18 @@ export function useGemini() {
     // Results
     if (options.includeResults !== false) {
       try {
-        const resSnap = await getDocs(
-          query(
-            collection(db, 'results'),
-            where('classId', '==', classId),
-            orderBy('createdAt', 'desc'),
-            limit(3)
-          )
-        );
-        context.results = resSnap.docs.map(d => {
-          const r = d.data();
-          const score = r.marksMap?.[userId];
-          return { testName: r.testName, subject: r.subject, score, maxMarks: r.maxMarks };
-        });
+        const { data: resDocs, error } = await supabase.from('results')
+          .select('*')
+          .eq('classId', classId)
+          .order('createdAt', { ascending: false })
+          .limit(3);
+          
+        if (!error && resDocs) {
+          context.results = resDocs.map(r => {
+            const score = r.marksMap?.[userId];
+            return { testName: r.testName, subject: r.subject, score, maxMarks: r.maxMarks };
+          });
+        }
       } catch (e) {
         console.warn('[AI] Failed to load results:', e);
       }
@@ -91,22 +87,20 @@ export function useGemini() {
     // Leave Status
     try {
       const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-      const leaveSnap = await getDocs(
-        query(
-          collection(db, 'leaveApplications'),
-          where('studentId', '==', userId),
-          where('appliedAt', '>=', startOfMonth)
-        )
-      );
-      
-      let pendingLeaves = 0;
-      let approvedLeaves = 0;
-      leaveSnap.docs.forEach(d => {
-        const l = d.data();
-        if (l.status === 'pending') pendingLeaves += l.daysCount;
-        if (l.status === 'approved') approvedLeaves += l.daysCount;
-      });
-      context.leaveStatus = { pendingDays: pendingLeaves, approvedDaysThisMonth: approvedLeaves };
+      const { data: leaveDocs, error } = await supabase.from('leaveApplications')
+        .select('*')
+        .eq('studentId', userId)
+        .gte('appliedAt', startOfMonth);
+        
+      if (!error && leaveDocs) {
+        let pendingLeaves = 0;
+        let approvedLeaves = 0;
+        leaveDocs.forEach(l => {
+          if (l.status === 'pending') pendingLeaves += l.daysCount;
+          if (l.status === 'approved') approvedLeaves += l.daysCount;
+        });
+        context.leaveStatus = { pendingDays: pendingLeaves, approvedDaysThisMonth: approvedLeaves };
+      }
     } catch (e) {
       console.warn('[AI] Failed to load leave status:', e);
     }
@@ -114,15 +108,15 @@ export function useGemini() {
     // Calendar
     if (options.includeCalendar !== false) {
       try {
-        const calSnap = await getDocs(
-          query(
-            collection(db, 'calendar'),
-            where('date', '>=', new Date().toISOString().split('T')[0]),
-            orderBy('date'),
-            limit(7)
-          )
-        );
-        context.calendar = calSnap.docs.map(d => d.data());
+        const { data: calDocs, error } = await supabase.from('calendar')
+          .select('*')
+          .gte('date', new Date().toISOString().split('T')[0])
+          .order('date', { ascending: true })
+          .limit(7);
+          
+        if (!error && calDocs) {
+          context.calendar = calDocs;
+        }
       } catch (e) {
         console.warn('[AI] Failed to load calendar:', e);
       }
@@ -130,38 +124,37 @@ export function useGemini() {
 
     // Announcements
     try {
-      const annSnap = await getDocs(
-        query(
-          collection(db, 'announcements'),
-          orderBy('timestamp', 'desc'),
-          limit(10)
-        )
-      );
-      context.announcements = annSnap.docs
-        .map(d => d.data())
-        .filter((a) => {
-          if (a.scope === 'college-wide') return true;
-          if (a.scope === 'section') return !a.targetSection || a.targetSection === userData.section;
-          if (a.scope === 'department') return !a.targetDept || a.targetDept === userData.department;
-          return true;
-        })
-        .slice(0, 2)
-        .map(a => a.title);
+      const { data: annDocs, error } = await supabase.from('announcements')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(10);
+        
+      if (!error && annDocs) {
+        context.announcements = annDocs
+          .filter((a) => {
+            if (a.scope === 'college-wide') return true;
+            if (a.scope === 'section') return !a.targetSection || a.targetSection === userData.section;
+            if (a.scope === 'department') return !a.targetDept || a.targetDept === userData.department;
+            return true;
+          })
+          .slice(0, 2)
+          .map(a => a.title);
+      }
     } catch (e) {
       console.warn('[AI] Failed to load announcements:', e);
     }
 
     // Events
     try {
-      const eventsSnap = await getDocs(
-        query(
-          collection(db, 'events'),
-          where('registrations', 'array-contains', userId),
-          where('date', '>=', new Date().toISOString().split('T')[0]),
-          limit(3)
-        )
-      );
-      context.registeredEvents = eventsSnap.docs.map(d => d.data().title);
+      const { data: eventsDocs, error } = await supabase.from('events')
+        .select('*')
+        .contains('registrations', [userId])
+        .gte('date', new Date().toISOString().split('T')[0])
+        .limit(3);
+        
+      if (!error && eventsDocs) {
+        context.registeredEvents = eventsDocs.map(d => d.title);
+      }
     } catch (e) {
       console.warn('[AI] Failed to load events:', e);
     }
@@ -175,7 +168,7 @@ export function useGemini() {
     setError(null);
     
     try {
-      const context = options.includeContext ? await buildAIContext(user.uid, options.contextPreferences) : { user: { name: profile?.name } };
+      const context = options.includeContext ? await buildAIContext(user.id, options.contextPreferences) : { user: { name: profile?.name } };
 
       const personality = context.user?.personality || 'friendly';
       const personalityPrompts = {

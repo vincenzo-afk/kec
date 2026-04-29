@@ -17,13 +17,13 @@ if (import.meta.env.DEV) {
     /Extension context invalidated/,
     /A listener indicated an asynchronous response/,
     /message channel closed/,
-    /@firebase\/firestore.*Quota exceeded/,
+    /@supabase\/postgrest-js.*Quota exceeded/,
     /Using maximum backoff delay/,
     /resource-exhausted/,
   ];
   
   const SUPPRESS_WARNINGS = [
-    /@firebase\/firestore/,
+    /@supabase\/postgrest-js/,
     /Using maximum backoff delay/,
     /FCM token error/,
     /VAPID/,
@@ -58,8 +58,8 @@ if (import.meta.env.DEV) {
   console.log = function(...args) {
     const message = args.join(' ');
     const shouldSuppress = [
-      /@firebase/,
-      /\[Firebase\]/,
+      /@supabase/,
+      /\[Supabase\]/,
     ].some(pattern => pattern.test(message));
     
     if (!shouldSuppress) {
@@ -70,7 +70,7 @@ if (import.meta.env.DEV) {
   console.info = function(...args) {
     const message = args.join(' ');
     const shouldSuppress = [
-      /@firebase/,
+      /@supabase/,
     ].some(pattern => pattern.test(message));
     
     if (!shouldSuppress) {

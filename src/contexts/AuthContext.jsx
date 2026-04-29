@@ -1,200 +1,167 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
-  sendPasswordResetEmail,
-  PhoneAuthProvider,
-  signInWithCredential,
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
-} from 'firebase/auth';
-import { doc, onSnapshot, setDoc, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
-import { auth, db } from '../firebase';
+import { supabase } from '../supabase';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);         // Firebase auth user
-  const [profile, setProfile] = useState(null);   // Firestore user doc
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [profileError, setProfileError] = useState(null);
 
-  // Listen to Firebase auth state
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      setProfileError(null);
-      if (!firebaseUser) {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user || null);
+      if (!session?.user) {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      if (!session?.user) {
         setProfile(null);
         setLoading(false);
       } else {
         setLoading(true);
       }
     });
-    return unsub;
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  // When user changes, subscribe to their Firestore profile
   useEffect(() => {
-    if (!user) return undefined;
+    if (!user) return;
 
-    const ref = doc(db, 'users', user.uid);
     let cancelled = false;
-    
-    // Set a timeout to prevent infinite loading
-    const loadingTimeout = setTimeout(() => {
-      if (!cancelled) {
-        console.warn('[Auth] Profile load timeout - setting loading to false');
-        setLoading(false);
+    const fetchProfile = async () => {
+      try {
+        const { data, error } = await supabase.from('users').select('*').eq('id', user.id).single();
+        if (cancelled) return;
+        
+        if (error) {
+          if (error.code !== 'PGRST116') {
+            setProfileError(error);
+          }
+          setProfile(null);
+        } else {
+          setProfile(data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setProfileError(err);
+          setProfile(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    }, 10000);
-    
-    const unsub = onSnapshot(ref, (snap) => {
-      if (cancelled) return;
-      
-      clearTimeout(loadingTimeout);
-      setProfileError(null);
-      if (!snap.exists()) {
-        setProfile(null);
-        setLoading(false);
-        return;
-      }
+    };
 
-      setProfile({ id: snap.id, ...snap.data() });
-      setLoading(false);
-    }, (error) => {
-      if (cancelled) return;
-      
-      clearTimeout(loadingTimeout);
-      console.error('[Auth] Failed to load user profile:', error);
-      // Don't set profileError for permission errors during initial load
-      // This allows the app to continue even if profile isn't immediately available
-      if (error.code !== 'permission-denied') {
-        setProfileError(error);
-      }
-      setProfile(null);
-      setLoading(false);
-    });
+    fetchProfile();
+
+    const channel = supabase.channel(`public:users:id=eq.${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: `id=eq.${user.id}` }, payload => {
+        if (payload.eventType === 'DELETE') {
+          setProfile(null);
+        } else {
+          setProfile(payload.new);
+        }
+      })
+      .subscribe();
 
     return () => {
       cancelled = true;
-      clearTimeout(loadingTimeout);
-      unsub();
+      supabase.removeChannel(channel);
     };
   }, [user]);
 
-  // Keep lastActive fresh for presence/online indicators
   useEffect(() => {
-    if (!user || !profile) return undefined;
-
-    const ref = doc(db, 'users', user.uid);
-    let quotaExceeded = false;
-    let backoffTime = 120000; // Start at 2 minutes
-    const MAX_BACKOFF = 600000; // Max 10 minutes
+    if (!user || !profile) return;
     
+    let quotaExceeded = false;
     const tick = async () => {
-      if (quotaExceeded) {
-        // Skip update if we're in backoff mode
-        return;
-      }
-      
+      if (quotaExceeded) return;
       try {
-        await updateDoc(ref, { lastActive: serverTimestamp() });
-        // Reset backoff on success
-        backoffTime = 120000;
-        quotaExceeded = false;
+        await supabase.from('users').update({ lastActive: new Date().toISOString() }).eq('id', user.id);
       } catch (error) {
-        if (error?.code === 'resource-exhausted') {
-          // Quota exceeded - enter backoff mode
-          quotaExceeded = true;
-          console.warn('[Auth] Quota exceeded, pausing lastActive updates');
-          
-          // Retry after backoff period
-          setTimeout(() => {
-            quotaExceeded = false;
-            backoffTime = Math.min(backoffTime * 2, MAX_BACKOFF);
-          }, backoffTime);
-        } else if (error?.code !== 'permission-denied') {
-          console.warn('[Auth] Failed to update lastActive:', error);
-        }
+        console.warn('[Auth] Failed to update lastActive:', error);
       }
     };
 
     tick();
-    const id = setInterval(tick, 120000); // Update every 2 minutes
+    const id = setInterval(tick, 120000);
     return () => clearInterval(id);
   }, [user, profile]);
 
-  // Email / Password signup
   const signupWithEmail = async (email, password, displayName) => {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    // Create pending user doc
-    await setDoc(doc(db, 'users', cred.user.uid), {
-      name: displayName,
+    const { data, error } = await supabase.auth.signUp({
       email,
-      phone: '',
-      role: 'student',
-      department: '',
-      year: '',
-      section: '',
-      registerNumber: '',
-      approvalStatus: 'pending',
-      fcmToken: '',
-      profilePhotoURL: '',
-      createdAt: serverTimestamp(),
-      lastActive: serverTimestamp(),
-      preferences: defaultPreferences(),
+      password,
     });
-    return cred;
+    if (error) throw error;
+    
+    if (data?.user) {
+      const { error: profileError } = await supabase.from('users').insert([{
+        id: data.user.id,
+        name: displayName,
+        email,
+        phone: '',
+        role: 'student',
+        department: '',
+        year: '',
+        section: '',
+        registerNumber: '',
+        approvalStatus: 'pending',
+        fcmToken: '',
+        profilePhotoURL: '',
+        createdAt: new Date().toISOString(),
+        lastActive: new Date().toISOString(),
+        preferences: defaultPreferences(),
+      }]);
+      if (profileError) throw profileError;
+    }
+    return data;
   };
 
   const loginWithEmail = async (email, password) => {
-    try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      const profileSnap = await getDoc(doc(db, 'users', cred.user.uid));
-      const prefs = profileSnap.exists() ? (profileSnap.data().preferences || {}) : {};
-      if (prefs.twoFactorEnabled === true && !cred.user.phoneNumber) {
-        await signOut(auth);
-        throw new Error('2FA is enabled. Use phone OTP login.');
-      }
-      return cred;
-    } catch (error) {
-      console.error('[Auth] Login error:', error);
-      throw error;
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    
+    const { data: profileSnap } = await supabase.from('users').select('preferences').eq('id', data.user.id).single();
+    const prefs = profileSnap?.preferences || {};
+    if (prefs.twoFactorEnabled === true && !data.user.phone) {
+      await supabase.auth.signOut();
+      throw new Error('2FA is enabled. Use phone OTP login.');
     }
+    return data;
   };
 
   const logout = async () => {
     if (user) {
-      // Make Firestore update non-blocking - don't wait for it
-      updateDoc(doc(db, 'users', user.uid), { lastActive: serverTimestamp() })
-        .catch(() => {}); // Silently ignore errors
+      await supabase.from('users').update({ lastActive: new Date().toISOString() }).eq('id', user.id).catch(() => {});
     }
-    // Immediately sign out without waiting
-    return signOut(auth);
+    return supabase.auth.signOut();
   };
 
-  const resetPassword = (email) => sendPasswordResetEmail(auth, email);
-  const requestPhoneOtp = async (phoneNumber, recaptchaContainerId = 'recaptcha-container') => {
-    if (window.recaptchaVerifier) {
-      try { window.recaptchaVerifier.clear(); } catch (_) {}
-      window.recaptchaVerifier = null;
-    }
-    window.recaptchaVerifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
-    await window.recaptchaVerifier.render();
-    return signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
+  const resetPassword = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    if (error) throw error;
   };
 
-  const verifyPhoneOtp = async (verificationId, otp) => {
-    const credential = PhoneAuthProvider.credential(verificationId, otp);
-    return signInWithCredential(auth, credential);
+  const requestPhoneOtp = async (phone) => {
+    const { data, error } = await supabase.auth.signInWithOtp({ phone });
+    if (error) throw error;
+    return data; // returning this so UI can just track the phone number state
   };
 
-  // Derived helpers
+  const verifyPhoneOtp = async (phone, otp) => {
+    const { data, error } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
+    if (error) throw error;
+    return data;
+  };
+
   const isApproved = profile?.approvalStatus === 'approved';
-  // If user exists but no profile exists in Firestore, treat as pending
   const isPending  = !!user && (!profile || profile.approvalStatus === 'pending');
   const role       = profile?.role || 'student';
   const isTeacher  = ['teacher', 'hod', 'principal'].includes(role);

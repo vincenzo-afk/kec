@@ -1,14 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { where, orderBy, limit, collectionGroup, query, onSnapshot, doc } from 'firebase/firestore';
+import { useSupabase } from '../../hooks/useSupabase';
+import { supabase } from '../../supabase';
 import { formatDistanceToNow } from 'date-fns';
-import { db } from '../../firebase';
 
 export default function Dashboard() {
   const { profile, role, isTeacher, isHod, isPrincipal } = useAuth();
-  const { subscribe } = useFirestore();
+  const { subscribe } = useSupabase();
 
   const [announcements, setAnnouncements] = useState([]);
   const [attendance, setAttendance]       = useState([]);
@@ -20,75 +19,81 @@ export default function Dashboard() {
   // Fetch latest announcements
   useEffect(() => {
     if (!profile) return;
-    return subscribe('announcements', [orderBy('timestamp', 'desc'), limit(3)], setAnnouncements);
+    return subscribe('announcements', q => q.order('timestamp', { ascending: false }).limit(3), setAnnouncements);
   }, [profile, subscribe]);
 
   // Fetch leave status
   useEffect(() => {
     if (!profile) return;
     
-    // Principals see all pending leaves across the college
     if (isPrincipal) {
-      return subscribe('leaveApplications', [
-        where('status', '==', 'pending'),
-        limit(50),
-      ], setLeaves);
+      return subscribe('leaveApplications', q => q.eq('status', 'pending').limit(50), setLeaves);
     }
     
     if (isTeacher) {
       if (!isHod) {
-        // Regular teacher: see their own class's pending leaves
-        return subscribe('leaveApplications', [where('teacherId', '==', profile.id), where('status', '==', 'pending')], setLeaves);
+        return subscribe('leaveApplications', q => q.eq('teacherId', profile.id).eq('status', 'pending'), setLeaves);
       } else {
-        // HOD: show pending leaves for their department
         const hasDepartment = profile.department && profile.department !== '';
         if (!hasDepartment) {
           setLeaves([]);
           return;
         }
-        return subscribe('leaveApplications', [
-          where('classId', '==', `${profile.department}-${profile.year}-${profile.section}`),
-          where('status', '==', 'pending'),
-          limit(50),
-        ], setLeaves);
+        return subscribe('leaveApplications', q => 
+          q.eq('classId', `${profile.department}-${profile.year}-${profile.section}`)
+           .eq('status', 'pending').limit(50), setLeaves);
       }
     } else {
-      return subscribe('leaveApplications', [where('studentId', '==', profile.id), orderBy('appliedAt', 'desc'), limit(3)], setLeaves);
+      return subscribe('leaveApplications', q => q.eq('studentId', profile.id).order('appliedAt', { ascending: false }).limit(3), setLeaves);
     }
   }, [profile, isTeacher, isHod, isPrincipal, subscribe]);
 
   // Fetch own attendance records (student)
   useEffect(() => {
     if (!profile || isTeacher) return;
-    return subscribe('attendance', [where('studentId', '==', profile.id), limit(200)], setAttendance);
+    return subscribe('attendance', q => q.eq('studentId', profile.id).limit(200), setAttendance);
   }, [profile, isTeacher, subscribe]);
 
   // Fetch achievement board preview
   useEffect(() => {
     if (!profile) return;
-    return subscribe('achievements', [orderBy('timestamp', 'desc'), limit(2)], setAchievements);
+    return subscribe('achievements', q => q.order('timestamp', { ascending: false }).limit(2), setAchievements);
   }, [profile, subscribe]);
 
   // Fetch upcoming calendar events
   useEffect(() => {
     if (!profile) return;
     
-    // Principals see all public and personal events
     if (isPrincipal) {
-      return subscribe('calendar', [
-        orderBy('date'),
-        limit(10),
-      ], setEvents);
+      return subscribe('calendar', q => q.order('date').limit(10), setEvents);
     }
     
-    return subscribe('calendar', [where('date', '>=', new Date().toISOString().split('T')[0]), orderBy('date'), limit(2)], setEvents);
+    return subscribe('calendar', q => q.gte('date', new Date().toISOString().split('T')[0]).order('date').limit(2), setEvents);
   }, [profile, isPrincipal, subscribe]);
 
   // Fetch unread chat count
   useEffect(() => {
     if (!profile) return;
-    const q = query(collectionGroup(db, 'messages'), where('receiverId', '==', profile.id), where('read', '==', false));
-    return onSnapshot(q, snap => setUnreadChats(snap.docs.length));
+    let cancelled = false;
+    
+    const fetchUnread = async () => {
+      const { count } = await supabase.from('p2p_messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('receiverId', profile.id)
+        .eq('read', false);
+      if (!cancelled) setUnreadChats(count || 0);
+    };
+    
+    fetchUnread();
+    
+    const channel = supabase.channel('dashboard_unread')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'p2p_messages', filter: `receiverId=eq.${profile.id}` }, fetchUnread)
+      .subscribe();
+      
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
   }, [profile]);
 
   const overallAtt = calcOverallAttendance(attendance);
@@ -317,12 +322,12 @@ function TeacherDashboardExtras({ profile }) {
 }
 
 function HodDashboardExtras({ profile }) {
-  const { subscribe } = useFirestore();
+  const { subscribe } = useSupabase();
   const [yearPct, setYearPct] = useState({ '1': 0, '2': 0, '3': 0, '4': 0 });
 
   useEffect(() => {
     if (!profile?.department) return;
-    return subscribe('attendance', [limit(5000)], (rows) => {
+    return subscribe('attendance', q => q.limit(5000), (rows) => {
       const filtered = rows.filter((r) => (r.classId || '').startsWith(`${profile.department}-`));
       const stats = { '1': { total: 0, good: 0 }, '2': { total: 0, good: 0 }, '3': { total: 0, good: 0 }, '4': { total: 0, good: 0 } };
       filtered.forEach((r) => {
@@ -364,10 +369,25 @@ function PrincipalDashboardExtras() {
   const [storageInfo, setStorageInfo] = useState(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'system', 'storage'), snap => {
-      if (snap.exists()) setStorageInfo(snap.data());
-    });
-    return unsub;
+    let cancelled = false;
+    
+    const fetchStorage = async () => {
+      const { data } = await supabase.from('system').select('*').eq('id', 'storage').single();
+      if (!cancelled && data) setStorageInfo(data);
+    };
+    
+    fetchStorage();
+    
+    const channel = supabase.channel('system_storage')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'system', filter: 'id=eq.storage' }, payload => {
+        setStorageInfo(payload.new);
+      })
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const usedGB = storageInfo?.usedMB ? (storageInfo.usedMB / 1024).toFixed(2) : 0;

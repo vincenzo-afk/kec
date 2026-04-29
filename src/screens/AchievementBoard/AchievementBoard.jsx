@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { orderBy, limit, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db, storage } from '../../firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useSupabase } from '../../hooks/useSupabase';
+import { supabase } from '../../supabase';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -13,7 +10,7 @@ const CAT_ICONS  = { certification: '🏅', competition: '🏆', project: '💡'
 
 export default function AchievementBoard() {
   const { profile, isHod } = useAuth();
-  const { subscribe, addDocument, deleteDocument } = useFirestore();
+  const { subscribe, addDocument, deleteDocument, updateDocument } = useSupabase();
   const [posts, setPosts] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', category: 'certification', description: '', externalLink: '' });
@@ -23,7 +20,7 @@ export default function AchievementBoard() {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('achievements', [orderBy('pinned', 'desc'), orderBy('timestamp', 'desc'), limit(50)], (rows) => {
+    return subscribe('achievements', q => q.order('pinned', { ascending: false }).order('timestamp', { ascending: false }).limit(50), (rows) => {
       setPosts(rows.filter((r) => r.approved !== false || isHod || r.postedBy === profile.id));
     });
   }, [profile, isHod, subscribe]);
@@ -37,10 +34,11 @@ export default function AchievementBoard() {
     try {
       let imageURL = null;
       if (file) {
-        const path = `achievements/${profile.id}/${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, path);
-        await uploadBytes(storageRef, file);
-        imageURL = await getDownloadURL(storageRef);
+        const path = `${profile.id}/${Date.now()}_${file.name}`;
+        const { error: uploadError } = await supabase.storage.from('achievements').upload(path, file);
+        if (uploadError) throw uploadError;
+        const { data } = supabase.storage.from('achievements').getPublicUrl(path);
+        imageURL = data.publicUrl;
       }
       await addDocument('achievements', {
         postedBy: profile.id, posterName: profile.name,
@@ -49,6 +47,7 @@ export default function AchievementBoard() {
         category: form.category, imageURL,
         externalLink: form.externalLink || null,
         likes: [], pinned: false, approved: isHod,
+        timestamp: new Date().toISOString()
       });
       toast.success(isHod ? 'Achievement posted! 🎉' : 'Achievement submitted for approval');
       setShowForm(false);
@@ -60,18 +59,19 @@ export default function AchievementBoard() {
 
   const toggleLike = async (post) => {
     const liked = post.likes?.includes(profile.id);
-    await updateDoc(doc(db, 'achievements', post.id), {
-      likes: liked ? arrayRemove(profile.id) : arrayUnion(profile.id),
-    });
+    const newLikes = liked
+      ? (post.likes || []).filter(id => id !== profile.id)
+      : [...(post.likes || []), profile.id];
+    await updateDocument('achievements', post.id, { likes: newLikes });
   };
 
   const togglePin = async (post) => {
-    await updateDoc(doc(db, 'achievements', post.id), { pinned: !post.pinned });
+    await updateDocument('achievements', post.id, { pinned: !post.pinned });
     toast.success(post.pinned ? 'Unpinned' : 'Pinned!');
   };
 
   const toggleApprove = async (post) => {
-    await updateDoc(doc(db, 'achievements', post.id), { approved: !(post.approved !== false) });
+    await updateDocument('achievements', post.id, { approved: !(post.approved !== false) });
   };
 
   const removePost = async (postId) => {
@@ -144,7 +144,7 @@ export default function AchievementBoard() {
                 <div className="avatar avatar-md">{post.posterName?.[0]}</div>
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-sm truncate">{post.posterName}</div>
-                  <div className="text-xs text-muted">{post.department} · {post.timestamp?.toDate ? formatDistanceToNow(post.timestamp.toDate(), { addSuffix: true }) : ''}</div>
+                  <div className="text-xs text-muted">{post.department} · {post.timestamp ? formatDistanceToNow(new Date(post.timestamp), { addSuffix: true }) : ''}</div>
                 </div>
                 <span className="badge badge-blue">{CAT_ICONS[post.category]} {post.category}</span>
               </div>

@@ -1,17 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { orderBy, limit, where } from 'firebase/firestore';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '../../firebase';
+import { useSupabase } from '../../hooks/useSupabase';
+import { supabase } from '../../supabase';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
 export default function Announcements() {
   const { profile, isTeacher, isHod } = useAuth();
-  const { subscribe, addDocument } = useFirestore();
+  const { subscribe, addDocument } = useSupabase();
   const [announcements, setAnnouncements] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', body: '', scope: 'section', pinned: false });
@@ -21,7 +17,7 @@ export default function Announcements() {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('announcements', [orderBy('timestamp', 'desc'), limit(50)], setAnnouncements);
+    return subscribe('announcements', q => q.order('timestamp', { ascending: false }).limit(50), setAnnouncements);
   }, [profile]);
 
   const setF = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -33,10 +29,11 @@ export default function Announcements() {
     try {
       let attachmentURL = null;
       if (file) {
-        const path = `announcements/${profile.id}/${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, path);
-        await uploadBytes(storageRef, file);
-        attachmentURL = await getDownloadURL(storageRef);
+        const path = `${profile.id}/${Date.now()}_${file.name}`;
+        const { error: uploadError } = await supabase.storage.from('announcements').upload(path, file);
+        if (uploadError) throw uploadError;
+        const { data } = supabase.storage.from('announcements').getPublicUrl(path);
+        attachmentURL = data.publicUrl;
       }
       await addDocument('announcements', {
         title: form.title, body: form.body,
@@ -46,6 +43,7 @@ export default function Announcements() {
         targetYear: profile.year || null,
         targetSection: profile.section || null,
         readBy: [], attachmentURL,
+        timestamp: new Date().toISOString(),
       });
       toast.success('Announcement posted!');
       setShowForm(false);
@@ -131,7 +129,7 @@ function AnnouncementCard({ a, profile, expanded, setExpanded }) {
   const isUnread = !a.readBy?.includes(profile?.id);
   const markRead = async () => {
     if (!isUnread || !profile?.id || !a?.id) return;
-    await updateDoc(doc(db, 'announcements', a.id), { readBy: arrayUnion(profile.id) }).catch(() => {});
+    await supabase.from('announcements').update({ readBy: [...(a.readBy || []), profile.id] }).eq('id', a.id).catch(() => {});
   };
 
   return (
@@ -149,7 +147,7 @@ function AnnouncementCard({ a, profile, expanded, setExpanded }) {
         </div>
       </div>
       <p className="text-xs text-muted" style={{ marginBottom: 4 }}>
-        {a.posterRole} · {a.timestamp?.toDate ? formatDistanceToNow(a.timestamp.toDate(), { addSuffix: true }) : ''}
+        {a.posterRole} · {a.timestamp ? formatDistanceToNow(new Date(a.timestamp), { addSuffix: true }) : ''}
       </p>
       {isExpanded && (
         <div>

@@ -3,9 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { usePreferences } from '../../hooks/usePreferences';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage, db } from '../../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { supabase } from '../../supabase';
 import toast from 'react-hot-toast';
 
 const SECTIONS = [
@@ -336,7 +334,7 @@ function ProfileSettings() {
     if (!name.trim()) return toast.error('Name cannot be empty');
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'users', user.uid), { name: name.trim() });
+      await supabase.from('users').update({ name: name.trim() }).eq('id', user.id);
       toast.success('Name updated!');
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
@@ -347,10 +345,11 @@ function ProfileSettings() {
     if (!file) return;
     setUploading(true);
     try {
-      const storageRef = ref(storage, `profile-photos/${user.uid}/${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, 'users', user.uid), { profilePhotoURL: url });
+      const path = `${user.id}/${file.name}`;
+      const { error: uploadError } = await supabase.storage.from('profile-photos').upload(path, file, { upsert: true });
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from('profile-photos').getPublicUrl(path);
+      await supabase.from('users').update({ profilePhotoURL: data.publicUrl }).eq('id', user.id);
       toast.success('Photo updated!');
     } catch (e) { toast.error(e.message); }
     finally { setUploading(false); }

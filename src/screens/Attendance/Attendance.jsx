@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { where, orderBy, limit, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { useSupabase } from '../../hooks/useSupabase';
+import { supabase } from '../../supabase';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, subMonths, addMonths } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -28,13 +27,13 @@ export default function Attendance() {
 }
 
 function StudentAttendance({ profile }) {
-  const { subscribe } = useFirestore();
+  const { subscribe } = useSupabase();
   const [records, setRecords] = useState([]);
   const [month, setMonth] = useState(new Date());
 
   useEffect(() => {
     if (!profile?.id) return;
-    return subscribe('attendance', [where('studentId', '==', profile.id), orderBy('date', 'desc'), limit(365)], setRecords);
+    return subscribe('attendance', q => q.eq('studentId', profile.id).order('date', { ascending: false }).limit(365), setRecords);
   }, [profile?.id, subscribe]);
 
   const overall = calcPercent(records);
@@ -95,7 +94,7 @@ function StudentAttendance({ profile }) {
 }
 
 function TeacherAttendance({ profile }) {
-  const { addDocument, fetchCollection } = useFirestore();
+  const { fetchCollection } = useSupabase();
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [subject, setSubject] = useState('');
   const [students, setStudents] = useState([]);
@@ -104,12 +103,12 @@ function TeacherAttendance({ profile }) {
 
   useEffect(() => {
     if (!profile) return;
-    fetchCollection('users', [
-      where('role', '==', 'student'),
-      where('department', '==', profile.department),
-      where('year', '==', profile.year),
-      where('section', '==', profile.section),
-    ]).then(setStudents).catch(() => {});
+    fetchCollection('users', q => q
+      .eq('role', 'student')
+      .eq('department', profile.department)
+      .eq('year', profile.year)
+      .eq('section', profile.section)
+    ).then(setStudents).catch(() => {});
   }, [profile, fetchCollection]);
 
   const toggle = (id) => setMarked(m => ({ ...m, [id]: m[id] === 'present' ? 'absent' : 'present' }));
@@ -127,15 +126,16 @@ function TeacherAttendance({ profile }) {
       for (const student of students) {
         const classId = `${profile.department}-${profile.year || student.year}-${student.section}`;
         const docId = `${student.id}_${date}_${subject.replace(/\s+/g, '_')}`;
-        await setDoc(doc(db, 'attendance', docId), {
+        await supabase.from('attendance').upsert({
+          id: docId,
           studentId: student.id,
           classId,
           date,
           subject,
           status: marked[student.id] || 'absent',
           markedBy: profile.id,
-          timestamp: serverTimestamp(),
-        }, { merge: true });
+          timestamp: new Date().toISOString(),
+        });
       }
       toast.success('Attendance saved!');
     } catch (e) {
@@ -176,12 +176,12 @@ function TeacherAttendance({ profile }) {
 }
 
 function AttendanceOverview({ profile, isPrincipal }) {
-  const { subscribe } = useFirestore();
+  const { subscribe } = useSupabase();
   const [records, setRecords] = useState([]);
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('attendance', [orderBy('date', 'desc'), limit(5000)], (rows) => {
+    return subscribe('attendance', q => q.order('date', { ascending: false }).limit(5000), (rows) => {
       const filtered = isPrincipal ? rows : rows.filter(r => (r.classId || '').startsWith(`${profile.department}-`));
       setRecords(filtered);
     });

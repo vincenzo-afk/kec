@@ -1,14 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '../../firebase';
-import { where, orderBy, limit } from 'firebase/firestore';
+import { useSupabase } from '../../hooks/useSupabase';
+import { supabase } from '../../supabase';
 import toast from 'react-hot-toast';
 
 export default function Timetable() {
   const { profile, isTeacher, isHod } = useAuth();
-  const { subscribe, addDocument, fetchDoc } = useFirestore();
+  const { subscribe, addDocument } = useSupabase();
   const [timetables, setTimetables] = useState([]);
   const [uploaderName, setUploaderName] = useState('');
   const [showUpload, setShowUpload] = useState(false);
@@ -20,8 +18,8 @@ export default function Timetable() {
   useEffect(() => {
     if (!profile) return;
     const constraints = isTeacher
-      ? [orderBy('uploadedAt', 'desc'), limit(5)]
-      : [where('department', '==', profile.department), where('year', '==', profile.year), where('section', '==', profile.section), orderBy('uploadedAt', 'desc'), limit(1)];
+      ? q => q.order('uploadedAt', { ascending: false }).limit(5)
+      : q => q.eq('department', profile.department).eq('year', profile.year).eq('section', profile.section).order('uploadedAt', { ascending: false }).limit(1);
     return subscribe('timetable', constraints, setTimetables);
   }, [profile]);
 
@@ -35,13 +33,15 @@ export default function Timetable() {
     if (!form.department || !form.year || !form.section) return toast.error('Fill all fields');
     setUploading(true);
     try {
-      const path = `timetables/${form.department}/${form.year}/${form.section}/${Date.now()}_${file.name}`;
-      const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, file);
-      const imageURL = await getDownloadURL(storageRef);
+      const path = `${form.department}/${form.year}/${form.section}/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage.from('timetables').upload(path, file);
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from('timetables').getPublicUrl(path);
+      const imageURL = data.publicUrl;
       await addDocument('timetable', {
         department: form.department, year: form.year, section: form.section,
         imageURL, uploadedBy: profile.id, validFrom: form.validFrom,
+        uploadedAt: new Date().toISOString(),
       });
       toast.success('Timetable uploaded!');
       setShowUpload(false);
@@ -62,9 +62,8 @@ export default function Timetable() {
   };
 
   useEffect(() => {
-    if (!current?.uploadedBy) return;
-    fetchDoc('users', current.uploadedBy).then((u) => setUploaderName(u?.name || current.uploadedBy)).catch(() => setUploaderName(current.uploadedBy));
-  }, [current?.uploadedBy, fetchDoc]);
+    supabase.from('users').select('*').eq('id', current.uploadedBy).single().then(({ data: u }) => setUploaderName(u?.name || current.uploadedBy)).catch(() => setUploaderName(current.uploadedBy));
+  }, [current?.uploadedBy]);
 
   return (
     <div className="page animate-fade">

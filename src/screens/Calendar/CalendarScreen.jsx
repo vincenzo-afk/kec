@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { where, orderBy } from 'firebase/firestore';
+import { useSupabase } from '../../hooks/useSupabase';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, parseISO, addMonths, subMonths } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -10,7 +9,7 @@ const typeIcons  = { test: '📝', holiday: '🏖️', personal: '📌', event: 
 
 export default function CalendarScreen() {
   const { profile, isTeacher, isHod } = useAuth();
-  const { subscribe, addDocument } = useFirestore();
+  const { subscribe, addDocument } = useSupabase();
   const [month, setMonth] = useState(new Date());
   const [events, setEvents] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -21,7 +20,7 @@ export default function CalendarScreen() {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('calendar', [orderBy('date', 'asc')], setEvents);
+    return subscribe('calendar', q => q.order('date', { ascending: true }), setEvents);
   }, [profile, subscribe]);
 
   const days = eachDayOfInterval({ start: startOfMonth(month), end: endOfMonth(month) });

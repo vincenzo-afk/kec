@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../firebase';
+import { supabase } from '../../supabase';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 
@@ -16,8 +15,10 @@ export default function FeedbackSubmit() {
     if (!text.trim()) return toast.error('Feedback text is required');
     setLoading(true);
     try {
-      const fn = httpsCallable(functions, 'submitAnonymousFeedback');
-      await fn({ text, targetType, targetName });
+      const { error } = await supabase.functions.invoke('submitAnonymousFeedback', {
+        body: { text, targetType, targetName }
+      });
+      if (error) throw error;
       toast.success('Feedback submitted anonymously!');
       navigate('/');
     } catch (err) {

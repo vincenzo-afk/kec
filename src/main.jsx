@@ -7,7 +7,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
-import { firebaseReady } from './firebase';
+
 import './utils/consoleFilter'; // Suppress non-critical dev errors
 import './styles/index.css';
 
@@ -54,7 +54,7 @@ function renderApp() {
   );
 }
 
-firebaseReady.finally(renderApp);
+renderApp();
 
 // Only register the app shell service worker in production builds.
 // In dev it can interfere with Vite + emulator network traffic.

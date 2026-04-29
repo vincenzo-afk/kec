@@ -1,11 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { where, orderBy, limit, serverTimestamp } from 'firebase/firestore';
-import { db, storage } from '../../firebase';
-import { doc, collection, addDoc, onSnapshot, query, updateDoc, setDoc, getDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useSupabase } from '../../hooks/useSupabase';
+import { supabase } from '../../supabase';
 import { formatDistanceToNow } from 'date-fns';
 import StudyGPT from '../StudyGPT/StudyGPT';
 import toast from 'react-hot-toast';
@@ -36,7 +33,7 @@ export default function Chat() {
 /* ───────── P2P ───────── */
 function P2PTab() {
   const { profile } = useAuth();
-  const { subscribe } = useFirestore();
+  const { subscribe } = useSupabase();
   const [conversations, setConversations] = useState([]);
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
@@ -44,25 +41,23 @@ function P2PTab() {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('users', [where('approvalStatus', '==', 'approved'), limit(200)], usersData => {
+    return subscribe('users', q => q.eq('approvalStatus', 'approved').limit(200), usersData => {
       setUsers(usersData.filter(u => u.id !== profile.id));
     });
   }, [profile, subscribe]);
 
   useEffect(() => {
     if (!profile?.id) return;
-    const q = query(collection(db, 'p2pMeta'), where('members', 'array-contains', profile.id), orderBy('lastMessageAt', 'desc'), limit(100));
-    return onSnapshot(q, async (snap) => {
-      const rows = await Promise.all(snap.docs.map(async (d) => {
-        const m = d.data();
+    return subscribe('p2pMeta', q => q.contains('members', [profile.id]).order('lastMessageAt', { ascending: false }).limit(100), async (snap) => {
+      const rows = await Promise.all(snap.map(async (m) => {
         const otherId = (m.members || []).find(id => id !== profile.id);
         let otherUser = users.find(u => u.id === otherId);
         if (!otherUser && otherId) {
-          const s = await getDoc(doc(db, 'users', otherId));
-          otherUser = s.exists() ? { id: s.id, ...s.data() } : { id: otherId, name: 'Unknown user' };
+          const { data: s } = await supabase.from('users').select('*').eq('id', otherId).single();
+          otherUser = s ? s : { id: otherId, name: 'Unknown user' };
         }
         return {
-          chatId: d.id,
+          chatId: m.id,
           otherUser,
           lastMessage: m.lastMessage || 'Tap to chat',
           unread: m.unreadBy?.[profile.id] || 0,
@@ -70,7 +65,7 @@ function P2PTab() {
       }));
       setConversations(rows);
     });
-  }, [profile?.id, users]);
+  }, [profile?.id, users, subscribe]);
 
   const startableUsers = users.filter(u => !conversations.some(c => c.otherUser?.id === u.id));
   const canMessage = (u) => {
@@ -123,48 +118,63 @@ function P2PTab() {
 }
 
 function P2PConversation({ chatId, other, onBack, profile }) {
+  const { subscribe } = useSupabase();
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    const q = query(collection(db, `p2pChats/${chatId}/messages`), orderBy('timestamp', 'asc'));
-    return onSnapshot(q, snap => {
-      const rows = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .filter((m) => !(Array.isArray(m.deletedFor) && m.deletedFor.includes(profile.id)));
-      setMessages(rows);
-      const unreadIncoming = rows.filter(m => m.senderId === other.id && m.read === false).map(m => m.id);
+    return subscribe('p2p_messages', q => q.eq('chatId', chatId).order('timestamp', { ascending: true }), rows => {
+      const msgs = rows.filter((m) => !(Array.isArray(m.deletedFor) && m.deletedFor.includes(profile.id)));
+      setMessages(msgs);
+      const unreadIncoming = msgs.filter(m => m.senderId === other.id && m.read === false).map(m => m.id);
       unreadIncoming.forEach((id) => {
-        updateDoc(doc(db, `p2pChats/${chatId}/messages/${id}`), { read: true }).catch(() => {});
+        supabase.from('p2p_messages').update({ read: true }).eq('id', id).then();
       });
-      setDoc(doc(db, `p2pMeta/${chatId}`), { [`unreadBy.${profile.id}`]: 0 }, { merge: true }).catch(() => {});
+      // clear unreads
+      supabase.from('p2pMeta').select('unreadBy').eq('id', chatId).single().then(({ data }) => {
+        if (data && data.unreadBy && data.unreadBy[profile.id] > 0) {
+          const newUnread = { ...data.unreadBy, [profile.id]: 0 };
+          supabase.from('p2pMeta').update({ unreadBy: newUnread }).eq('id', chatId).then();
+        }
+      });
     });
-  }, [chatId, other.id, profile.id]);
+  }, [chatId, other.id, profile.id, subscribe]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
-  const isOnline = profile?.preferences?.showOnlineStatus !== false && other?.lastActive?.toDate
-    ? (Date.now() - other.lastActive.toDate().getTime()) < 5 * 60 * 1000
+  const isOnline = profile?.preferences?.showOnlineStatus !== false && other?.lastActive
+    ? (Date.now() - new Date(other.lastActive).getTime()) < 5 * 60 * 1000
     : false;
 
   const send = async (imageURL = null) => {
     if (!text.trim() && !imageURL) return;
     const messageText = text.trim();
-    await addDoc(collection(db, `p2pChats/${chatId}/messages`), {
+    await supabase.from('p2p_messages').insert([{
+      chatId,
       senderId: profile.id, receiverId: other.id,
       text: messageText, imageURL: imageURL || null,
-      timestamp: serverTimestamp(), read: false, deletedFor: [],
-    });
-    await setDoc(doc(db, `p2pMeta/${chatId}`), {
+      timestamp: new Date().toISOString(), read: false, deletedFor: [],
+    }]);
+
+    const { data: meta } = await supabase.from('p2pMeta').select('unreadBy').eq('id', chatId).single();
+    let newUnread = meta?.unreadBy || {};
+    newUnread[other.id] = (newUnread[other.id] || 0) + 1;
+    newUnread[profile.id] = 0;
+
+    const upsertData = {
+      id: chatId,
       members: [profile.id, other.id].sort(),
       lastMessage: imageURL ? '📷 Image' : messageText,
-      lastMessageAt: serverTimestamp(),
-      [`unreadBy.${other.id}`]: (messages.filter(m => m.senderId === profile.id && !m.read).length || 0) + 1,
-      [`unreadBy.${profile.id}`]: 0,
-    }, { merge: true });
+      lastMessageAt: new Date().toISOString(),
+      unreadBy: newUnread
+    };
+    
+    const { error } = await supabase.from('p2pMeta').upsert(upsertData);
+    if (error) console.error("Error upserting p2pMeta", error);
+    
     setText('');
   };
 
@@ -173,11 +183,11 @@ function P2PConversation({ chatId, other, onBack, profile }) {
     if (!file) return;
     setUploading(true);
     try {
-      const path = `chats/p2p/${chatId}/${Date.now()}_${file.name}`;
-      const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      await send(url);
+      const path = `${chatId}/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage.from('chats').upload(path, file);
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from('chats').getPublicUrl(path);
+      await send(data.publicUrl);
     } catch (err) { toast.error(err.message); }
     finally { setUploading(false); }
   };
@@ -208,11 +218,11 @@ function P2PConversation({ chatId, other, onBack, profile }) {
                 )}
                 {m.deletedForEveryone ? 'This message was deleted' : m.text}
                 <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, textAlign: 'right' }}>
-                  {m.timestamp?.toDate ? formatDistanceToNow(m.timestamp.toDate(), { addSuffix: true }) : ''}
+                  {m.timestamp ? formatDistanceToNow(new Date(m.timestamp), { addSuffix: true }) : ''}
                   {isMe && <span style={{ marginLeft: 4 }}>{m.read ? ' ✓✓' : ' ✓'}</span>}
                 </div>
                 {isMe && !m.deletedForEveryone && (
-                  <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: 0, marginTop: 4, color: 'inherit' }} onClick={() => updateDoc(doc(db, `p2pChats/${chatId}/messages/${m.id}`), { text: 'This message was deleted', imageURL: null, deletedForEveryone: true })}>
+                  <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: 0, marginTop: 4, color: 'inherit' }} onClick={() => supabase.from('p2p_messages').update({ text: 'This message was deleted', imageURL: null, deletedForEveryone: true }).eq('id', m.id)}>
                     Delete for everyone
                   </button>
                 )}
@@ -237,6 +247,7 @@ function P2PConversation({ chatId, other, onBack, profile }) {
 /* ───────── Groups ───────── */
 function GroupsTab() {
   const { profile } = useAuth();
+  const { subscribe } = useSupabase();
   const [groups, setGroups] = useState([]);
   const [active, setActive] = useState(null);
   const [showInfo, setShowInfo] = useState(null);
@@ -244,16 +255,15 @@ function GroupsTab() {
 
   useEffect(() => {
     if (!profile?.id) return;
-    const q = query(collection(db, 'groupChats'), where('members', 'array-contains', profile.id));
-    return onSnapshot(q, snap => setGroups(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  }, [profile?.id]);
+    return subscribe('groupChats', q => q.contains('members', [profile.id]), setGroups);
+  }, [profile?.id, subscribe]);
 
   useEffect(() => {
     if (!showInfo?.members?.length) return;
     Promise.all(showInfo.members.map(async (id) => {
       try {
-        const snap = await getDoc(doc(db, 'users', id));
-        return [id, snap.exists() ? (snap.data().name || id) : id];
+        const { data: snap } = await supabase.from('users').select('name').eq('id', id).single();
+        return [id, snap ? (snap.name || id) : id];
       } catch {
         return [id, id];
       }
@@ -295,22 +305,23 @@ function GroupsTab() {
 }
 
 function GroupConversation({ group, onBack, profile }) {
+  const { subscribe } = useSupabase();
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    const q = query(collection(db, `groupChats/${group.id}/messages`), orderBy('timestamp', 'asc'), limit(100));
-    return onSnapshot(q, snap => setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  }, [group.id]);
+    return subscribe('group_messages', q => q.eq('groupId', group.id).order('timestamp', { ascending: true }).limit(100), setMessages);
+  }, [group.id, subscribe]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const send = async () => {
     if (!text.trim()) return;
-    await addDoc(collection(db, `groupChats/${group.id}/messages`), {
-      senderId: profile.id, text: text.trim(), timestamp: serverTimestamp(), readBy: [profile.id],
-    });
+    await supabase.from('group_messages').insert([{
+      groupId: group.id,
+      senderId: profile.id, text: text.trim(), timestamp: new Date().toISOString(), readBy: [profile.id],
+    }]);
     setText('');
   };
 

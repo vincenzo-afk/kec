@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { where, orderBy, limit, serverTimestamp } from 'firebase/firestore';
+import { useSupabase } from '../../hooks/useSupabase';
 import toast from 'react-hot-toast';
 
 export default function Results() {
@@ -13,16 +12,15 @@ export default function Results() {
 
 /* ────────── Student View ────────── */
 function StudentResults({ profile }) {
-  const { subscribe } = useFirestore();
+  const { subscribe } = useSupabase();
   const [results, setResults] = useState([]);
   const [rank, setRank] = useState(null);
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('results', [
-      where('classId', '==', `${profile.department}-${profile.year}-${profile.section}`),
-      orderBy('createdAt', 'desc'),
-    ], setResults);
+    return subscribe('results', q => q
+      .eq('classId', `${profile.department}-${profile.year}-${profile.section}`)
+      .order('createdAt', { ascending: false }), setResults);
   }, [profile, subscribe]);
 
   useEffect(() => {
@@ -108,7 +106,7 @@ function StudentResults({ profile }) {
 /* ────────── Teacher View ────────── */
 function TeacherResults({ profile }) {
   const canLockTests = ['hod', 'principal'].includes(profile?.role);
-  const { addDocument, subscribe, fetchCollection, updateDocument } = useFirestore();
+  const { addDocument, subscribe, fetchCollection, updateDocument } = useSupabase();
   const [tests, setTests] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ testName: '', subject: '', maxMarks: '' });
@@ -119,22 +117,21 @@ function TeacherResults({ profile }) {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('results', [
-      where('teacherId', '==', profile.id),
-      orderBy('createdAt', 'desc'),
-    ], setTests);
+    return subscribe('results', q => q
+      .eq('teacherId', profile.id)
+      .order('createdAt', { ascending: false }), setTests);
   }, [profile?.id, subscribe]);
 
   useEffect(() => {
     if (!profile) return;
     const loadStudents = async () => {
       try {
-        const list = await fetchCollection('users', [
-          where('role', '==', 'student'),
-          where('department', '==', profile.department),
-          where('year', '==', profile.year),
-          where('section', '==', profile.section)
-        ]);
+        const list = await fetchCollection('users', q => q
+          .eq('role', 'student')
+          .eq('department', profile.department)
+          .eq('year', profile.year)
+          .eq('section', profile.section)
+        );
         setStudents(list);
       } catch (err) {}
     };
@@ -285,7 +282,7 @@ function TeacherResults({ profile }) {
                 <button className="btn btn-danger" onClick={async () => {
                   if (!window.confirm("Are you sure? Locking prevents further edits.")) return;
                   try {
-                    await updateDocument('results', selectedTest.id, { lockedBy: profile.id, lockedAt: serverTimestamp() });
+                    await updateDocument('results', selectedTest.id, { lockedBy: profile.id, lockedAt: new Date().toISOString() });
                     toast.success('Test locked');
                     setSelectedTest(null);
                   } catch (e) { toast.error(e.message); }
@@ -321,12 +318,12 @@ function TeacherResults({ profile }) {
 }
 
 function HodResultsMatrix({ profile }) {
-  const { subscribe } = useFirestore();
+  const { subscribe } = useSupabase();
   const [rows, setRows] = useState([]);
 
   useEffect(() => {
     if (!profile?.department) return;
-    return subscribe('results', [orderBy('createdAt', 'desc'), limit(500)], (all) => {
+    return subscribe('results', q => q.order('createdAt', { ascending: false }).limit(500), (all) => {
       const dept = all.filter(r => (r.classId || '').startsWith(`${profile.department}-`));
       const map = {};
       dept.forEach((r) => {

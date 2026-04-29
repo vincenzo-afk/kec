@@ -47,11 +47,11 @@ export default function Login() {
             setLoading(true);
             try {
               if (!verificationId) {
-                const confirmationResult = await requestPhoneOtp(phone, 'recaptcha-container');
-                setVerificationId(confirmationResult.verificationId);
+                await requestPhoneOtp(phone);
+                setVerificationId(true); // just a flag to show OTP input
                 toast.success('OTP sent to your phone');
               } else {
-                await verifyPhoneOtp(verificationId, otp);
+                await verifyPhoneOtp(phone, otp);
               }
             } catch (err) {
               toast.error(err.message);
@@ -69,7 +69,6 @@ export default function Login() {
                 <input className="form-input" placeholder="6-digit code" value={otp} onChange={e => setOtp(e.target.value)} required />
               </div>
             )}
-            <div id="recaptcha-container" />
             <button className="btn btn-primary btn-full btn-lg" disabled={loading} type="submit">
               {loading ? <span className="spinner" /> : verificationId ? 'Verify OTP' : 'Send OTP'}
             </button>

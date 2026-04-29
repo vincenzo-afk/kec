@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { db } from '../../firebase';
-import { collection, query, orderBy, where, getDocs, updateDoc, doc } from 'firebase/firestore';
+import { supabase } from '../../supabase';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -14,26 +13,25 @@ export default function FeedbackDashboard() {
   useEffect(() => {
     if (!isPrincipal && !isHod) return;
 
-    let q;
-    if (isPrincipal) {
-      q = query(collection(db, 'feedback'), orderBy('createdAt', 'desc'));
-    } else {
-      q = query(collection(db, 'feedback'), where('department', '==', profile.department), orderBy('createdAt', 'desc'));
+    let q = supabase.from('feedback').select('*').order('createdAt', { ascending: false });
+    if (!isPrincipal) {
+      q = q.eq('department', profile.department);
     }
 
-    getDocs(q).then(snap => {
-      setFeedbacks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    }).catch(e => {
-      console.error(e);
-      toast.error('Failed to load feedback');
+    q.then(({ data, error }) => {
+      if (error) {
+        console.error(error);
+        toast.error('Failed to load feedback');
+      } else {
+        setFeedbacks(data || []);
+      }
       setLoading(false);
     });
   }, [profile, isPrincipal, isHod]);
 
   const toggleRead = async (id, currentRead) => {
     try {
-      await updateDoc(doc(db, 'feedback', id), { isRead: !currentRead });
+      await supabase.from('feedback').update({ isRead: !currentRead }).eq('id', id);
       setFeedbacks(prev => prev.map(f => f.id === id ? { ...f, isRead: !currentRead } : f));
     } catch {
       toast.error('Could not update status');
@@ -108,7 +106,7 @@ export default function FeedbackDashboard() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted">
-                    {f.createdAt?.toDate ? formatDistanceToNow(f.createdAt.toDate(), { addSuffix: true }) : 'Just now'}
+                    {f.createdAt ? formatDistanceToNow(new Date(f.createdAt), { addSuffix: true }) : 'Just now'}
                   </span>
                   <button className="btn btn-ghost btn-icon btn-sm" onClick={() => toggleRead(f.id, f.isRead)} title={f.isRead ? 'Mark Unread' : 'Mark Read'}>
                     {f.isRead ? '📖' : '📕'}

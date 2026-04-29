@@ -1,22 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { db } from '../../firebase';
-import { 
-  collection, 
-  onSnapshot, 
-  query, 
-  orderBy, 
-  limit, 
-  where, 
-  doc, 
-  updateDoc, 
-  getDocs, 
-  startAfter,
-  addDoc,
-  serverTimestamp,
-  arrayUnion,
-} from 'firebase/firestore';
+import { supabase } from '../../supabase';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -49,7 +33,7 @@ export default function AdminPanel() {
 /* ──────── Users Tab ──────── */
 function UsersTab() {
   const [users, setUsers] = useState([]);
-  const [lastDoc, setLastDoc] = useState(null);
+  const [page, setPage] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ role: 'all', status: 'all', search: '' });
@@ -57,25 +41,28 @@ function UsersTab() {
 
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(200));
-      const snap = await getDocs(q);
-      if (!mounted) return;
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLastDoc(snap.docs[snap.docs.length - 1] || null);
-      setLoading(false);
-    })();
+    const fetchUsers = async () => {
+      const { data } = await supabase.from('users').select('*').order('createdAt', { ascending: false }).range(0, 199);
+      if (mounted && data) {
+        setUsers(data);
+        setPage(1);
+        setLoading(false);
+      }
+    };
+    fetchUsers();
     return () => { mounted = false; };
   }, []);
 
   const loadMore = async () => {
-    if (!lastDoc) return;
     setLoadingMore(true);
     try {
-      const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(200));
-      const snap = await getDocs(q);
-      setUsers(prev => [...prev, ...snap.docs.map(d => ({ id: d.id, ...d.data() }))]);
-      setLastDoc(snap.docs[snap.docs.length - 1] || null);
+      const from = page * 200;
+      const to = from + 199;
+      const { data } = await supabase.from('users').select('*').order('createdAt', { ascending: false }).range(from, to);
+      if (data && data.length > 0) {
+        setUsers(prev => [...prev, ...data]);
+        setPage(p => p + 1);
+      }
     } finally {
       setLoadingMore(false);
     }
@@ -88,45 +75,20 @@ function UsersTab() {
     setProcessing(p => ({ ...p, [userId]: true }));
     
     try {
-      console.log('[Admin] Approving user:', userId, approvalData);
-      const userRef = doc(db, 'users', userId);
-      console.log('[Admin] Testing Firestore connection...');
-      
-      const { getDoc } = await import('firebase/firestore');
-      const testSnap = await Promise.race([
-        getDoc(userRef),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore connection test timed out')), 5000))
-      ]);
-      
-      console.log('[Admin] User document exists:', testSnap.exists());
-      console.log('[Admin] Current user data:', testSnap.data());
-      
-      if (!testSnap.exists()) {
-        throw new Error('User document not found in Firestore');
-      }
-      
-      // Now try the update using direct REST API (bypasses SDK connection issues)
-      console.log('[Admin] Attempting to update user via REST API...');
-      const { directFirestoreUpdate } = await import('../../utils/directFirestore');
-      
-      await directFirestoreUpdate(`users/${userId}`, {
+      const { error } = await supabase.from('users').update({
         role: approvalData.role,
         department: approvalData.department,
         year: approvalData.year,
         section: approvalData.section,
         approvalStatus: 'approved',
-        updatedAt: new Date(),
-      });
+        updatedAt: new Date().toISOString(),
+      }).eq('id', userId);
       
-      console.log('[Admin] User approved successfully!');
+      if (error) throw error;
+      
+      setUsers(users.map(u => u.id === userId ? { ...u, ...approvalData, approvalStatus: 'approved' } : u));
       toast.success('User approved!');
     } catch (e) {
-      console.error('[Admin] Approval error:', e);
-      console.error('[Admin] Error details:', {
-        code: e?.code,
-        message: e?.message,
-        name: e?.name,
-      });
       toast.error(e?.message || 'Approval failed');
     } finally {
       setProcessing(p => ({ ...p, [userId]: false }));
@@ -136,14 +98,15 @@ function UsersTab() {
   const suspendUser = async (userId) => {
     setProcessing(p => ({ ...p, [userId]: true }));
     try {
-      // Client-side suspension (Cloud Functions not available on Spark plan)
-      await updateDoc(doc(db, 'users', userId), {
+      const { error } = await supabase.from('users').update({
         approvalStatus: 'suspended',
-        updatedAt: serverTimestamp(),
-      });
+        updatedAt: new Date().toISOString(),
+      }).eq('id', userId);
+      
+      if (error) throw error;
+      setUsers(users.map(u => u.id === userId ? { ...u, approvalStatus: 'suspended' } : u));
       toast.success('User suspended');
     } catch (e) {
-      console.error('Suspend error:', e);
       toast.error(e.message);
     } finally {
       setProcessing(p => ({ ...p, [userId]: false }));
@@ -187,7 +150,7 @@ function UsersTab() {
         {filtered.length === 0 && <div className="empty-state"><div className="empty-state-icon">👥</div><p>No users found</p></div>}
         {filtered.map(u => <UserCard key={u.id} u={u} onApprove={approveUser} onSuspend={suspendUser} processing={processing[u.id]} />)}
       </div>
-      {lastDoc && (
+      {users.length >= page * 200 && (
         <div style={{ marginTop: 'var(--space-4)', textAlign: 'center' }}>
           <button className="btn btn-secondary btn-sm" onClick={loadMore} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load More Users'}</button>
         </div>
@@ -275,10 +238,24 @@ function StorageTab() {
   const [storageInfo, setStorageInfo] = useState(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'system', 'storage'), snap => {
-      if (snap.exists()) setStorageInfo(snap.data());
-    });
-    return unsub;
+    let cancelled = false;
+    const fetchStorage = async () => {
+      const { data } = await supabase.from('system').select('*').eq('id', 'storage').single();
+      if (!cancelled && data) setStorageInfo(data);
+    };
+    
+    fetchStorage();
+    
+    const channel = supabase.channel('system_storage_admin')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'system', filter: 'id=eq.storage' }, payload => {
+        setStorageInfo(payload.new);
+      })
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const usedGB = storageInfo?.usedMB ? (storageInfo.usedMB / 1024).toFixed(2) : 0;
@@ -286,8 +263,7 @@ function StorageTab() {
 
   const runCleanup = async () => {
     try {
-      const fn = httpsCallable(functions, 'storageMonitor');
-      await fn({ manual: true });
+      await supabase.functions.invoke('storageMonitor', { body: { manual: true } });
       toast.success('Cleanup triggered!');
     } catch (e) { toast.error('Cleanup failed: ' + e.message); }
   };
@@ -295,7 +271,7 @@ function StorageTab() {
   return (
     <div>
       <div className="card" style={{ padding: 'var(--space-6)', marginBottom: 'var(--space-4)' }}>
-        <h3 style={{ marginBottom: 'var(--space-5)', fontSize: 'var(--font-size-md)' }}>Firebase Storage Monitor</h3>
+        <h3 style={{ marginBottom: 'var(--space-5)', fontSize: 'var(--font-size-md)' }}>Supabase Storage Monitor</h3>
         <div style={{ marginBottom: 'var(--space-3)' }}>
           <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
             <span className="text-sm font-semibold">{usedGB} GB / 5 GB</span>
@@ -313,7 +289,7 @@ function StorageTab() {
           {[
             ['💾', 'Used', `${storageInfo?.usedMB || 0} MB`],
             ['📁', 'Files', storageInfo?.fileCount || 0],
-            ['🧹', 'Last Cleanup', storageInfo?.lastCleanupAt ? formatDistanceToNow(storageInfo.lastCleanupAt.toDate(), { addSuffix: true }) : 'Never'],
+            ['🧹', 'Last Cleanup', storageInfo?.lastCleanupAt ? formatDistanceToNow(new Date(storageInfo.lastCleanupAt), { addSuffix: true }) : 'Never'],
           ].map(([icon, label, val]) => (
             <div key={label} style={{ textAlign: 'center', padding: 'var(--space-3)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }}>
               <div style={{ fontSize: 24, marginBottom: 4 }}>{icon}</div>
@@ -334,20 +310,31 @@ function AnalyticsTab() {
   const [storageInfo, setStorageInfo] = useState(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'users'));
-    return onSnapshot(q, snap => {
-      const users = snap.docs.map(d => d.data());
+    let cancelled = false;
+    const fetchUsers = async () => {
+      // Just fetching all user basic info to calculate stats
+      const { data } = await supabase.from('users').select('role, approvalStatus');
+      if (cancelled || !data) return;
+      
       setStats({
-        total: users.length,
-        students: users.filter(u => u.role === 'student').length,
-        teachers: users.filter(u => u.role === 'teacher').length,
-        hods: users.filter(u => u.role === 'hod').length,
-        pending: users.filter(u => u.approvalStatus === 'pending').length,
+        total: data.length,
+        students: data.filter(u => u.role === 'student').length,
+        teachers: data.filter(u => u.role === 'teacher').length,
+        hods: data.filter(u => u.role === 'hod').length,
+        pending: data.filter(u => u.approvalStatus === 'pending').length,
       });
-    });
+    };
+    
+    fetchUsers();
+    
+    const fetchStorage = async () => {
+      const { data } = await supabase.from('system').select('*').eq('id', 'storage').single();
+      if (!cancelled && data) setStorageInfo(data);
+    };
+    fetchStorage();
+    
+    return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => onSnapshot(doc(db, 'system', 'storage'), snap => setStorageInfo(snap.exists() ? snap.data() : null)), []);
 
   const cards = [
     ['👥', 'Total Users', stats.total, 'var(--color-primary-muted)', 'var(--color-primary)'],
@@ -358,11 +345,10 @@ function AnalyticsTab() {
   ];
 
   const health = [
-    ['Firebase Auth', stats.total > 0 ? 'Operational' : 'No data', stats.total > 0 ? 'badge-green' : 'badge-grey'],
-    ['Firestore', stats.total > 0 ? 'Operational' : 'No data', stats.total > 0 ? 'badge-green' : 'badge-grey'],
+    ['Supabase Auth', stats.total > 0 ? 'Operational' : 'No data', stats.total > 0 ? 'badge-green' : 'badge-grey'],
+    ['PostgreSQL DB', stats.total > 0 ? 'Operational' : 'No data', stats.total > 0 ? 'badge-green' : 'badge-grey'],
     ['Storage', storageInfo?.lastCheckedAt ? 'Operational' : 'Unknown', storageInfo?.lastCheckedAt ? 'badge-green' : 'badge-gold'],
-    ['Cloud Functions', storageInfo?.lastCleanupAt || storageInfo?.lastCheckedAt ? 'Operational' : 'Unknown', storageInfo?.lastCleanupAt || storageInfo?.lastCheckedAt ? 'badge-green' : 'badge-gold'],
-    ['FCM Push', stats.total > 0 ? 'Monitoring' : 'Unknown', stats.total > 0 ? 'badge-blue' : 'badge-grey'],
+    ['Edge Functions', storageInfo?.lastCleanupAt || storageInfo?.lastCheckedAt ? 'Operational' : 'Unknown', storageInfo?.lastCleanupAt || storageInfo?.lastCheckedAt ? 'badge-green' : 'badge-gold'],
   ];
 
   return (
@@ -409,29 +395,27 @@ function ReportsTab() {
 
   const exportLeave = async () => {
     try {
-      const fn = httpsCallable(functions, 'exportLeaveReport');
-      const result = await fn({});
-      downloadCsv('leave-report.csv', result.data.records || []);
+      const { data, error } = await supabase.from('leaveApplications').select('*');
+      if (error) throw error;
+      downloadCsv('leave-report.csv', data || []);
       toast.success('Report exported!');
     } catch (e) { toast.error('Export failed: ' + e.message); }
   };
 
   const exportEventHeadcount = async () => {
     try {
-      const snap = await getDocs(query(collection(db, 'events'), orderBy('date', 'asc')));
-      const rows = snap.docs.map(d => {
-        const e = d.data();
-        return {
-          id: d.id,
-          title: e.title,
-          date: e.date,
-          venue: e.venue,
-          category: e.category,
-          status: e.status,
-          registrations: e.registrations?.length || 0,
-          maxCapacity: e.maxCapacity || '',
-        };
-      });
+      const { data, error } = await supabase.from('events').select('*').order('date', { ascending: true });
+      if (error) throw error;
+      const rows = data.map(e => ({
+        id: e.id,
+        title: e.title,
+        date: e.date,
+        venue: e.venue,
+        category: e.category,
+        status: e.status,
+        registrations: e.registrations?.length || 0,
+        maxCapacity: e.maxCapacity || '',
+      }));
       downloadCsv('event-headcount-report.csv', rows);
       toast.success('Event report exported');
     } catch (e) { toast.error(e.message); }
@@ -440,15 +424,14 @@ function ReportsTab() {
   const exportAttendanceSummary = async () => {
     try {
       const byClass = {};
-      let cursor = null;
+      let page = 0;
       while (true) {
-        const q = cursor
-          ? query(collection(db, 'attendance'), orderBy('date', 'desc'), startAfter(cursor), limit(2000))
-          : query(collection(db, 'attendance'), orderBy('date', 'desc'), limit(2000));
-        const snap = await getDocs(q);
-        if (snap.empty) break;
-        snap.docs.forEach((d) => {
-          const r = d.data();
+        const from = page * 2000;
+        const to = from + 1999;
+        const { data, error } = await supabase.from('attendance').select('*').order('date', { ascending: false }).range(from, to);
+        if (error || !data || data.length === 0) break;
+        
+        data.forEach((r) => {
           const key = r.classId || 'unknown';
           if (!byClass[key]) byClass[key] = { classId: key, total: 0, present: 0, absent: 0, leave: 0 };
           byClass[key].total += 1;
@@ -456,8 +439,9 @@ function ReportsTab() {
           if (r.status === 'absent') byClass[key].absent += 1;
           if (r.status === 'leave') byClass[key].leave += 1;
         });
-        cursor = snap.docs[snap.docs.length - 1];
-        if (snap.docs.length < 2000) break;
+        
+        if (data.length < 2000) break;
+        page++;
       }
       const rows = Object.values(byClass).map((r) => ({
         ...r,

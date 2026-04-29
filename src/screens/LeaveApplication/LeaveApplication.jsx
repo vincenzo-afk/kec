@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useFirestore } from '../../hooks/useFirestore';
-import { where, orderBy, limit } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '../../firebase';
+import { useSupabase } from '../../hooks/useSupabase';
+import { supabase } from '../../supabase';
 import { formatDistanceToNow, differenceInDays, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -18,7 +16,7 @@ export default function LeaveApplication() {
 }
 
 function StudentLeavePanel({ profile }) {
-  const { subscribe, addDocument } = useFirestore();
+  const { subscribe, addDocument } = useSupabase();
   const [leaves, setLeaves] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ fromDate: '', toDate: '', type: 'medical', reason: '' });
@@ -27,7 +25,7 @@ function StudentLeavePanel({ profile }) {
 
   useEffect(() => {
     if (!profile?.id) return;
-    return subscribe('leaveApplications', [where('studentId', '==', profile.id), orderBy('appliedAt', 'desc'), limit(20)], setLeaves);
+    return subscribe('leaveApplications', q => q.eq('studentId', profile.id).order('appliedAt', { ascending: false }).limit(20), setLeaves);
   }, [profile?.id]);
 
   const setF = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -41,10 +39,11 @@ function StudentLeavePanel({ profile }) {
     try {
       let attachmentURL = null;
       if (file) {
-        const path = `leave-attachments/${profile.id}/${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, path);
-        await uploadBytes(storageRef, file);
-        attachmentURL = await getDownloadURL(storageRef);
+        const path = `${profile.id}/${Date.now()}_${file.name}`;
+        const { error: uploadError } = await supabase.storage.from('leave-attachments').upload(path, file);
+        if (uploadError) throw uploadError;
+        const { data } = supabase.storage.from('leave-attachments').getPublicUrl(path);
+        attachmentURL = data.publicUrl;
       }
       await addDocument('leaveApplications', {
         studentId: profile.id,
@@ -136,7 +135,7 @@ function StudentLeavePanel({ profile }) {
 }
 
 function TeacherLeavePanel({ profile, isHod }) {
-  const { subscribe, updateDocument, fetchCollection } = useFirestore();
+  const { subscribe, updateDocument, fetchCollection } = useSupabase();
   const [leaves, setLeaves] = useState([]);
   const [students, setStudents] = useState({});  // id -> name map
   const [reviewNote, setReviewNote] = useState({});
@@ -145,10 +144,10 @@ function TeacherLeavePanel({ profile, isHod }) {
   // Preload student names for this class
   useEffect(() => {
     if (!profile) return;
-    fetchCollection('users', [
-      where('role', '==', 'student'),
-      where('department', '==', profile.department),
-    ]).then(list => {
+    fetchCollection('users', q => q
+      .eq('role', 'student')
+      .eq('department', profile.department)
+    ).then(list => {
       const map = {};
       list.forEach(u => { map[u.id] = u.name || u.email || u.id.slice(0, 8); });
       setStudents(map);
@@ -157,10 +156,9 @@ function TeacherLeavePanel({ profile, isHod }) {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('leaveApplications', [
-      where('classId', '==', `${profile.department}-${profile.year}-${profile.section}`),
-      orderBy('appliedAt', 'desc'), limit(50),
-    ], setLeaves);
+    return subscribe('leaveApplications', q => q
+      .eq('classId', `${profile.department}-${profile.year}-${profile.section}`)
+      .order('appliedAt', { ascending: false }).limit(50), setLeaves);
   }, [profile]);
 
   const decide = async (id, status) => {

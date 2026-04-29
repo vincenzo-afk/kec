@@ -16,6 +16,13 @@ export function NotificationProvider({ children }) {
     if (!user || !isApproved) return;
     // Push notifications are noisy/fragile in local emulator dev.
     if (import.meta.env.DEV && String(import.meta.env.VITE_USE_EMULATORS || '') === 'true') return;
+    
+    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+    if (!vapidKey || vapidKey === 'your-vapid-key') {
+      console.warn('[Notifications] VAPID key not configured. Push notifications disabled.');
+      return;
+    }
+    
     let unsub;
     (async () => {
       const messaging = await getMessagingInstance();
@@ -24,20 +31,31 @@ export function NotificationProvider({ children }) {
       try {
         const permission = await Notification.requestPermission();
         if (permission !== 'granted') return;
+        
         const token = await getToken(messaging, {
-          vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+          vapidKey: vapidKey,
         });
+        
         if (token) {
           await updateDoc(doc(db, 'users', user.uid), { fcmToken: token });
           try {
             const fn = httpsCallable(functions, 'syncNotificationTopics');
             await fn({ token });
           } catch (e) {
-            console.warn('Topic sync failed:', e);
+            console.warn('[Notifications] Topic sync failed:', e);
           }
         }
       } catch (e) {
-        console.warn('FCM token error:', e);
+        // Suppress invalid VAPID key errors - they're not critical
+        const isVapidError = 
+          e?.name === 'InvalidAccessError' ||
+          e?.code === 'messaging/failed-scope-vapid-key' ||
+          e?.message?.includes('applicationServerKey') ||
+          e?.message?.includes('subscribe');
+        
+        if (!isVapidError) {
+          console.warn('[Notifications] FCM token error:', e);
+        }
       }
 
       unsub = onMessage(messaging, (payload) => {

@@ -6,10 +6,19 @@ import toast from 'react-hot-toast';
 export default function PendingApproval() {
   const { profile, logout } = useAuth();
   const navigate = useNavigate();
+  const [loggingOut, setLoggingOut] = React.useState(false);
 
   const handleLogout = async () => {
-    await logout();
-    navigate('/login');
+    setLoggingOut(true);
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } catch (error) {
+      console.error('[Pending] Logout error:', error);
+      toast.error('Logout failed. Please try again.');
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -23,6 +32,19 @@ export default function PendingApproval() {
         padding: 'var(--space-10)', maxWidth: 460, width: '100%',
         textAlign: 'center', boxShadow: '0 24px 60px rgba(0,0,0,0.35)',
       }}>
+        {/* Debug info */}
+        {import.meta.env.DEV && (
+          <div style={{
+            background: '#f0f0f0', padding: '8px', borderRadius: '4px',
+            marginBottom: '16px', fontSize: '12px', textAlign: 'left',
+          }}>
+            <div><strong>DEBUG:</strong></div>
+            <div>Email: {profile?.email}</div>
+            <div>UID: {profile?.id}</div>
+            <div>Status: {profile?.approvalStatus}</div>
+          </div>
+        )}
+        
         <div style={{ fontSize: 64, marginBottom: 'var(--space-5)' }}>⏳</div>
         <h2 style={{ marginBottom: 'var(--space-3)' }}>Awaiting Approval</h2>
         <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-6)', lineHeight: 1.7 }}>
@@ -45,8 +67,8 @@ export default function PendingApproval() {
           </div>
         </div>
 
-        <button className="btn btn-secondary btn-full" onClick={handleLogout}>
-          Sign out & try different account
+        <button className="btn btn-secondary btn-full" onClick={handleLogout} disabled={loggingOut}>
+          {loggingOut ? 'Signing out...' : 'Sign out & try different account'}
         </button>
       </div>
     </div>

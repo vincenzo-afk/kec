@@ -26,12 +26,26 @@ export default function Dashboard() {
   // Fetch leave status
   useEffect(() => {
     if (!profile) return;
+    
+    // Principals see all pending leaves across the college
+    if (isPrincipal) {
+      return subscribe('leaveApplications', [
+        where('status', '==', 'pending'),
+        limit(50),
+      ], setLeaves);
+    }
+    
     if (isTeacher) {
-      if (!isHod && !isPrincipal) {
+      if (!isHod) {
         // Regular teacher: see their own class's pending leaves
         return subscribe('leaveApplications', [where('teacherId', '==', profile.id), where('status', '==', 'pending')], setLeaves);
       } else {
-        // HOD / Principal: show pending leaves for their department class
+        // HOD: show pending leaves for their department
+        const hasDepartment = profile.department && profile.department !== '';
+        if (!hasDepartment) {
+          setLeaves([]);
+          return;
+        }
         return subscribe('leaveApplications', [
           where('classId', '==', `${profile.department}-${profile.year}-${profile.section}`),
           where('status', '==', 'pending'),
@@ -58,8 +72,17 @@ export default function Dashboard() {
   // Fetch upcoming calendar events
   useEffect(() => {
     if (!profile) return;
+    
+    // Principals see all public and personal events
+    if (isPrincipal) {
+      return subscribe('calendar', [
+        orderBy('date'),
+        limit(10),
+      ], setEvents);
+    }
+    
     return subscribe('calendar', [where('date', '>=', new Date().toISOString().split('T')[0]), orderBy('date'), limit(2)], setEvents);
-  }, [profile, subscribe]);
+  }, [profile, isPrincipal, subscribe]);
 
   // Fetch unread chat count
   useEffect(() => {

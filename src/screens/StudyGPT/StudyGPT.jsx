@@ -40,15 +40,9 @@ export default function StudyGPT() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const hasApiKey = !!profile?.encryptedGeminiKey;
-
   const doSend = async (qText) => {
     const q = qText.trim();
     if (!q || loading) return;
-    if (!hasApiKey) {
-      toast.error('Set your Gemini API key in Settings → AI Settings first');
-      return;
-    }
 
     const userMsg = { id: Date.now().toString(), role: 'user', content: q };
     setMessages(m => [...m, userMsg]);
@@ -105,7 +99,7 @@ export default function StudyGPT() {
           <div style={{ fontSize: 28 }}>🤖</div>
           <div>
             <div className="font-semibold">StudyGPT</div>
-            <div className="text-xs text-muted">Powered by Gemini 2.5 Flash</div>
+            <div className="text-xs text-muted">Powered by Groq AI</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -120,18 +114,6 @@ export default function StudyGPT() {
           <button className="btn btn-ghost btn-sm btn-icon" onClick={clearConversation} title="Clear conversation">🗑️</button>
         </div>
       </div>
-
-      {/* No API Key Banner */}
-      {!hasApiKey && (
-        <div style={{
-          background: 'var(--color-warning-muted)', borderBottom: '1px solid var(--color-warning)',
-          padding: 'var(--space-3) var(--space-5)', display: 'flex', alignItems: 'center', gap: 12,
-        }}>
-          <span>⚠️</span>
-          <span className="text-sm" style={{ flex: 1 }}>No Gemini API key set.</span>
-          <Link to="/settings/ai" className="btn btn-accent btn-sm">Add Key</Link>
-        </div>
-      )}
 
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -171,7 +153,7 @@ export default function StudyGPT() {
             className="form-input"
             style={{ resize: 'none', maxHeight: 140, overflow: 'auto', lineHeight: 1.5 }}
             rows={1}
-            placeholder={hasApiKey ? 'Ask anything in English or Tamil…' : 'Set your Gemini API key first…'}
+            placeholder="Ask anything in English or Tamil…"
             value={input}
             onChange={e => {
               setInput(e.target.value);
@@ -179,14 +161,13 @@ export default function StudyGPT() {
               e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
             }}
             onKeyDown={handleKey}
-            disabled={!hasApiKey}
           />
           <button
             id="studygpt-send"
             className="btn btn-primary btn-icon"
             style={{ width: 42, height: 42, fontSize: 18, flexShrink: 0 }}
             onClick={send}
-            disabled={loading || !input.trim() || !hasApiKey}
+            disabled={loading || !input.trim()}
           >
             {loading ? <span className="spinner" /> : '↑'}
           </button>

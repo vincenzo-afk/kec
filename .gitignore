@@ -9,3 +9,6 @@ firebase-debug.log
 *firebase-adminsdk*.json
 .emulator-data
 .emulator-data/
+
+service-account.json
+

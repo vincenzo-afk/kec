@@ -15,16 +15,41 @@ export function useFirestore() {
   const subscribe = useCallback((collectionPath, constraints = [], callback) => {
     const ref = collection(db, collectionPath);
     const q = query(ref, ...constraints);
-    return onSnapshot(q, (snap) => {
-      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    
+    let cancelled = false;
+    const unsub = onSnapshot(q, (snap) => {
+      if (!cancelled) {
+        callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }
+    }, (error) => {
+      if (!cancelled && error?.code !== 'permission-denied') {
+        console.warn(`[Firestore] Subscribe error on ${collectionPath}:`, error);
+      }
     });
+    
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, []);
 
   // ── Single-doc listener ──
   const subscribeDoc = useCallback((path, callback) => {
-    return onSnapshot(doc(db, path), (snap) => {
-      callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    let cancelled = false;
+    const unsub = onSnapshot(doc(db, path), (snap) => {
+      if (!cancelled) {
+        callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+      }
+    }, (error) => {
+      if (!cancelled && error?.code !== 'permission-denied') {
+        console.warn(`[Firestore] SubscribeDoc error on ${path}:`, error);
+      }
     });
+    
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, []);
 
   // ── Add document ──

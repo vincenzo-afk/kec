@@ -1,9 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
-import { httpsCallable } from 'firebase/functions';
-import { functions, db } from '../../firebase';
-import { collection, onSnapshot, query, orderBy, limit, where, doc, updateDoc, getDocs, startAfter } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { 
+  collection, 
+  onSnapshot, 
+  query, 
+  orderBy, 
+  limit, 
+  where, 
+  doc, 
+  updateDoc, 
+  getDocs, 
+  startAfter,
+  addDoc,
+  serverTimestamp,
+  arrayUnion,
+} from 'firebase/firestore';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -73,12 +86,48 @@ function UsersTab() {
       return toast.error('Fill all assignment fields');
     }
     setProcessing(p => ({ ...p, [userId]: true }));
+    
     try {
-      const fn = httpsCallable(functions, 'approveUser');
-      await fn({ userId, ...approvalData });
+      console.log('[Admin] Approving user:', userId, approvalData);
+      const userRef = doc(db, 'users', userId);
+      console.log('[Admin] Testing Firestore connection...');
+      
+      const { getDoc } = await import('firebase/firestore');
+      const testSnap = await Promise.race([
+        getDoc(userRef),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore connection test timed out')), 5000))
+      ]);
+      
+      console.log('[Admin] User document exists:', testSnap.exists());
+      console.log('[Admin] Current user data:', testSnap.data());
+      
+      if (!testSnap.exists()) {
+        throw new Error('User document not found in Firestore');
+      }
+      
+      // Now try the update using direct REST API (bypasses SDK connection issues)
+      console.log('[Admin] Attempting to update user via REST API...');
+      const { directFirestoreUpdate } = await import('../../utils/directFirestore');
+      
+      await directFirestoreUpdate(`users/${userId}`, {
+        role: approvalData.role,
+        department: approvalData.department,
+        year: approvalData.year,
+        section: approvalData.section,
+        approvalStatus: 'approved',
+        updatedAt: new Date(),
+      });
+      
+      console.log('[Admin] User approved successfully!');
       toast.success('User approved!');
     } catch (e) {
-      toast.error(e?.message || 'Approval failed. If you are on emulators, start the Functions emulator.');
+      console.error('[Admin] Approval error:', e);
+      console.error('[Admin] Error details:', {
+        code: e?.code,
+        message: e?.message,
+        name: e?.name,
+      });
+      toast.error(e?.message || 'Approval failed');
     } finally {
       setProcessing(p => ({ ...p, [userId]: false }));
     }
@@ -87,11 +136,18 @@ function UsersTab() {
   const suspendUser = async (userId) => {
     setProcessing(p => ({ ...p, [userId]: true }));
     try {
-      const fn = httpsCallable(functions, 'suspendUser');
-      await fn({ userId });
+      // Client-side suspension (Cloud Functions not available on Spark plan)
+      await updateDoc(doc(db, 'users', userId), {
+        approvalStatus: 'suspended',
+        updatedAt: serverTimestamp(),
+      });
       toast.success('User suspended');
-    } catch (e) { toast.error(e.message); }
-    finally { setProcessing(p => ({ ...p, [userId]: false })); }
+    } catch (e) {
+      console.error('Suspend error:', e);
+      toast.error(e.message);
+    } finally {
+      setProcessing(p => ({ ...p, [userId]: false }));
+    }
   };
 
   const filtered = users.filter(u => {

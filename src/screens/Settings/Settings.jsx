@@ -3,11 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { usePreferences } from '../../hooks/usePreferences';
-import { useGemini } from '../../hooks/useGemini';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage, db, functions } from '../../firebase';
+import { storage, db } from '../../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import toast from 'react-hot-toast';
 
 const SECTIONS = [
@@ -174,53 +172,25 @@ function LanguageSettings() {
 /* ── AI Settings ── */
 function AISettings() {
   const { preferences, updatePreference } = usePreferences();
-  const { encryptApiKey, clearApiKey } = useGemini();
-  const { profile } = useAuth();
-  const [apiKey, setApiKey] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const saveKey = async () => {
-    if (!apiKey.trim()) return toast.error('Enter your Gemini API key');
-    setSaving(true);
-    try {
-      await encryptApiKey(apiKey.trim());
-      setApiKey('');
-      toast.success('API key saved securely!');
-    } catch (e) { toast.error('Failed: ' + e.message); }
-    finally { setSaving(false); }
-  };
-
-  const removeKey = async () => {
-    await clearApiKey();
-    toast.success('API key removed');
-  };
 
   return (
     <div className="card" style={{ padding: 'var(--space-5)' }}>
       <h3 style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--font-size-md)' }}>🤖 AI / StudyGPT</h3>
+      <p className="text-sm text-muted" style={{ marginBottom: 'var(--space-4)' }}>
+        AI is powered by a central Groq API key. No setup required — just start chatting!
+      </p>
       <SettingRow label="AI Personality" hint="Changes system prompt tone">
         <Select value={preferences.studyGptPersonality || 'friendly'} onChange={v => updatePreference('studyGptPersonality', v)} options={[['formal','Formal'],['friendly','Friendly'],['tutor','Tutor']]} />
       </SettingRow>
-      <SettingRow label="Include Attendance" hint="Send attendance data to Gemini">
+      <SettingRow label="Include Attendance" hint="Send attendance data to AI">
         <Toggle value={preferences.includeAttendance !== false} onChange={v => updatePreference('includeAttendance', v)} />
       </SettingRow>
-      <SettingRow label="Include Results" hint="Send test scores to Gemini">
+      <SettingRow label="Include Results" hint="Send test scores to AI">
         <Toggle value={preferences.includeResults !== false} onChange={v => updatePreference('includeResults', v)} />
       </SettingRow>
-      <SettingRow label="Include Notes" hint="Send section PDFs to Gemini">
+      <SettingRow label="Include Notes" hint="Send section PDFs to AI">
         <Toggle value={preferences.includeNotes !== false} onChange={v => updatePreference('includeNotes', v)} />
       </SettingRow>
-      <div style={{ paddingTop: 'var(--space-4)' }}>
-        <label className="form-label" style={{ marginBottom: 8, display: 'block' }}>
-          Gemini API Key {profile?.encryptedGeminiKey ? '✅ Set' : '❌ Not set'}
-        </label>
-        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-          <input className="form-input" type="password" placeholder="AIza…" value={apiKey} onChange={e => setApiKey(e.target.value)} style={{ flex: 1 }} />
-          <button className="btn btn-primary" onClick={saveKey} disabled={saving}>{saving ? <span className="spinner"/> : 'Save'}</button>
-          {profile?.encryptedGeminiKey && <button className="btn btn-danger btn-sm" onClick={removeKey}>Remove</button>}
-        </div>
-        <p className="form-hint" style={{ marginTop: 6 }}>Your key is AES-256 encrypted server-side and never exposed to the client again.</p>
-      </div>
     </div>
   );
 }
@@ -328,8 +298,7 @@ function PrivacySettings() {
   const { preferences, updatePreference } = usePreferences();
   const toggleTwoFactor = async (v) => {
     try {
-      const fn = httpsCallable(functions, 'setTwoFactor');
-      await fn({ enabled: v });
+      // Client-side 2FA toggle (Cloud Functions not available on Spark plan)
       await updatePreference('twoFactorEnabled', v);
       toast.success(v ? '2FA Enabled!' : '2FA Disabled');
     } catch (e) {

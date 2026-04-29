@@ -1,0 +1,49 @@
+type User @table {
+  displayName: String!
+  email: String!
+  createdAt: Timestamp!
+  photoUrl: String
+  major: String
+  year: Int
+}
+
+type Club @table {
+  name: String!
+  description: String!
+  category: String!
+  createdAt: Timestamp!
+  contactEmail: String
+  websiteUrl: String
+  imageUrl: String
+}
+
+type Membership @table(key: ["user", "club"]) {
+  user: User!
+  club: Club!
+  joinedAt: Timestamp!
+  role: String
+}
+
+type Event @table {
+  club: Club
+  title: String!
+  description: String!
+  startTime: Timestamp!
+  endTime: Timestamp!
+  location: String!
+  createdAt: Timestamp!
+  imageUrl: String
+}
+
+type Attendance @table(key: ["user", "event"]) {
+  user: User!
+  event: Event!
+  status: String!
+}
+
+type Post @table {
+  user: User!
+  content: String!
+  createdAt: Timestamp!
+  imageUrl: String
+}

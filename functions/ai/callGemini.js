@@ -1,25 +1,13 @@
 const { onCall } = require('firebase-functions/v2/https');
 const { getFirestore } = require('firebase-admin/firestore');
-const crypto = require('crypto');
 const https = require('https');
 const { fetchPDFContext } = require('./fetchPDFContext');
 
-const db      = getFirestore();
-const ALGO    = 'aes-256-gcm';
+const db = getFirestore();
 
-function getKey() {
-  const keyHex = process.env.AES_KEY;
-  if (!keyHex || keyHex.length !== 64) throw new Error('AES_KEY env var must be 32-byte hex (64 chars)');
-  return Buffer.from(keyHex, 'hex');
-}
-
-function decrypt(payload) {
-  const key = getKey();
-  const [ivHex, encHex, tagHex] = payload.split(':');
-  const decipher = crypto.createDecipheriv(ALGO, key, Buffer.from(ivHex, 'hex'));
-  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
-  return decipher.update(Buffer.from(encHex, 'hex')) + decipher.final('utf8');
-}
+// Central Groq API key - only admins should have access to this
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
 async function buildAIContext(userId, options = {}) {
   const userSnap = await db.doc(`users/${userId}`).get();
@@ -84,7 +72,6 @@ async function buildAIContext(userId, options = {}) {
   }
 
   // Announcements
-  // Avoid compound query requiring composite index and 'in' query with null
   const annSnap = await db.collection('announcements')
     .orderBy('timestamp', 'desc')
     .limit(10)
@@ -119,9 +106,8 @@ exports.callGemini = onCall({ enforceAppCheck: false, timeoutSeconds: 120 }, asy
 
   const userSnap = await db.doc(`users/${uid}`).get();
   const userData = userSnap.data();
-  if (!userData?.encryptedGeminiKey) throw new Error('No API key configured. Set your Gemini key in Settings.');
+  if (!userData) throw new Error('User not found');
 
-  const apiKey = decrypt(userData.encryptedGeminiKey);
   const mergedPrefs = {
     ...(userData.preferences || {}),
     ...(contextPreferences || {}),
@@ -146,40 +132,51 @@ STUDENT CONTEXT:
 - Latest Announcements: ${JSON.stringify(context.announcements || [])}
 - Registered Events: ${JSON.stringify(context.registeredEvents || [])}`;
 
-  const messageParts = [{ text: message }];
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: message },
+  ];
 
+  // Add PDF context if available
   if (includeContext && mergedPrefs?.includeNotes !== false) {
     const pdfParts = await fetchPDFContext(userData);
     if (pdfParts && pdfParts.length > 0) {
-      messageParts.push({ text: "\n\nSECTION NOTES (Attached for context):\n" });
-      pdfParts.forEach(p => messageParts.push(p));
+      const pdfText = pdfParts.map(p => p.text || '').join('\n');
+      if (pdfText) {
+        messages.splice(1, 0, {
+          role: 'user',
+          content: `\n\nSECTION NOTES (Attached for context):\n${pdfText}`
+        });
+      }
     }
   }
 
   const payload = JSON.stringify({
-    contents: [
-      { role: 'user', parts: [{ text: systemPrompt }] },
-      { role: 'model', parts: [{ text: 'Understood! I\'m ready to help.' }] },
-      { role: 'user', parts: messageParts },
-    ],
-    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    model: GROQ_MODEL,
+    messages: messages,
+    temperature: 0.7,
+    max_tokens: 2048,
   });
 
   const reply = await new Promise((resolve, reject) => {
     const req = https.request({
-      hostname: 'generativelanguage.googleapis.com',
-      path: `/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      hostname: 'api.groq.com',
+      path: '/openai/v1/chat/completions',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        'Content-Length': Buffer.byteLength(payload),
+      },
     }, (res) => {
       let data = '';
       res.on('data', d => data += d);
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
-          const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+          const text = json.choices?.[0]?.message?.content;
           if (text) resolve(text);
-          else reject(new Error(json.error?.message || 'No response from Gemini'));
+          else reject(new Error(json.error?.message || 'No response from Groq'));
         } catch (e) { reject(e); }
       });
     });

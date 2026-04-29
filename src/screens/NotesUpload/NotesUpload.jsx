@@ -118,13 +118,32 @@ function NotesList() {
 
   useEffect(() => {
     if (!profile) return;
-    return subscribe('notes', [
-      where('department', '==', profile.department),
-      where('year', '==', profile.year),
-      where('section', '==', profile.section),
-      orderBy('uploadedAt', 'desc'),
-      limit(100),
-    ], (data) => { setNotes(data); setLoading(false); });
+    
+    // Principals/admins can view all notes (no department filter)
+    const isPrincipal = profile.role === 'principal';
+    const hasDepartment = profile.department && profile.department !== '';
+    
+    if (!isPrincipal && !hasDepartment) {
+      // User doesn't have department assigned yet
+      setLoading(false);
+      setNotes([]);
+      return;
+    }
+    
+    const constraints = isPrincipal
+      ? [orderBy('uploadedAt', 'desc'), limit(100)]
+      : [
+          where('department', '==', profile.department),
+          where('year', '==', profile.year),
+          where('section', '==', profile.section),
+          orderBy('uploadedAt', 'desc'),
+          limit(100),
+        ];
+    
+    return subscribe('notes', constraints, (data) => {
+      setNotes(data);
+      setLoading(false);
+    });
   }, [profile, subscribe]);
 
   const subjects = ['all', ...new Set(notes.map(n => n.subject).filter(Boolean))];

@@ -1,0 +1,28 @@
+mutation CreateDemoData @transaction @auth(level: USER, insecureReason: "This mutation is for seeding data and should only be run by authenticated users with appropriate permissions.") {
+  user_insertMany(data: [
+    {
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      username: "demouser1",
+      email: "demo1@example.com",
+      createdAt: "2023-01-01T10:00:00Z"
+    },
+    {
+      id: "550e8400-e29b-41d4-a716-446655440001",
+      username: "demouser2",
+      email: "demo2@example.com",
+      createdAt: "2023-01-02T11:00:00Z"
+    }
+  ])
+  comment_insertMany(data: [
+    {
+      userId: "550e8400-e29b-41d4-a716-446655440000",
+      content: "This is the first comment by demouser1.",
+      createdAt: "2023-01-01T10:30:00Z"
+    },
+    {
+      userId: "550e8400-e29b-41d4-a716-446655440001",
+      content: "Hello from demouser2!",
+      createdAt: "2023-01-02T11:45:00Z"
+    }
+  ])
+}

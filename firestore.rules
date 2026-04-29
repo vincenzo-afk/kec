@@ -24,9 +24,17 @@ service cloud.firestore {
 
     // ── Users ─────────────────────────────────────────────────────
     match /users/{userId} {
-      allow read: if isAuth() && (uid() == userId || isTeacher());
+      allow read: if isAuth() && (uid() == userId || isTeacher() || isPrincipal());
       allow create: if isAuth() && uid() == userId;
-      allow update: if isAuth() && uid() == userId; // preferences only; role changes via Cloud Functions
+      // Users can update their own profile, principals can update any user (for approvals)
+      allow update: if isAuth() && (
+        uid() == userId || 
+        (isApproved() && userDoc().data.role == 'principal')
+      );
+    }
+    // Allow principals to list all users
+    match /users {
+      allow list: if isAuth() && isPrincipal();
     }
 
     // ── Notes ─────────────────────────────────────────────────────

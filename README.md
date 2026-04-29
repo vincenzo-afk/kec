@@ -3,6 +3,32 @@
 > **Your College, Smarter.**
 > A full-stack college management super-app for Kingston Engineering College — built as a React PWA, delivered as a Google Play TWA, powered by Gemini 2.5 Flash.
 
+## Quick Start
+
+### Live Firebase development
+
+```bash
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+- Fill in every `VITE_FIREBASE_*` value in `.env.local`, including `VITE_FIREBASE_APP_ID`.
+- Keep `VITE_USE_EMULATORS=false` unless you are actively running the local Firebase Emulator Suite.
+
+### Local emulator development
+
+```bash
+npm install
+cp .env.example .env.local
+npm run dev:emu
+npm run dev
+```
+
+- Set `VITE_USE_EMULATORS=true` in `.env.local` only when `npm run dev:emu` is running.
+- Optional emulators stay separate: set `VITE_USE_FUNCTIONS_EMULATOR=true` and/or `VITE_USE_STORAGE_EMULATOR=true` when you need them.
+- The frontend now falls back to live Firebase automatically if the Auth and Firestore emulators are not reachable, which avoids the `127.0.0.1:9099` token refresh loop shown in the browser console.
+
 ---
 
 ## Table of Contents

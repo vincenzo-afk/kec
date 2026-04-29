@@ -18,19 +18,31 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
-  event.respondWith(
-    fetch(event.request)
+  // SPA navigations: network-first, offline fallback.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(async () => {
+        const cached = await caches.match(OFFLINE_URL);
+        return cached || Response.error();
+      })
+    );
+    return;
+  }
+
+  // Other requests: serve from cache when possible, refresh in background.
+  event.respondWith((async () => {
+    const cached = await caches.match(event.request);
+    const fetchPromise = fetch(event.request)
       .then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        // Only cache successful, basic (same-origin) responses.
+        if (response && response.ok && response.type === 'basic') {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
         return response;
       })
-      .catch(async () => {
-        const cached = await caches.match(event.request);
-        if (cached) return cached;
-        if (event.request.mode === 'navigate') return caches.match(OFFLINE_URL);
-        // For non-navigation requests, let the request fail naturally.
-        return Response.error();
-      })
-  );
+      .catch(() => null);
+
+    return cached || (await fetchPromise) || Response.error();
+  })());
 });

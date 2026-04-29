@@ -19,14 +19,18 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);         // Firebase auth user
   const [profile, setProfile] = useState(null);   // Firestore user doc
   const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState(null);
 
   // Listen to Firebase auth state
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
+      setProfileError(null);
       if (!firebaseUser) {
         setProfile(null);
         setLoading(false);
+      } else {
+        setLoading(true);
       }
     });
     return unsub;
@@ -34,32 +38,94 @@ export function AuthProvider({ children }) {
 
   // When user changes, subscribe to their Firestore profile
   useEffect(() => {
-    if (!user) return;
+    if (!user) return undefined;
+
     const ref = doc(db, 'users', user.uid);
-    const unsub = onSnapshot(ref, (snap) => {
-      if (snap.exists()) {
-        setProfile({ id: snap.id, ...snap.data() });
-      } else {
-        setProfile(null);
+    let cancelled = false;
+    
+    // Set a timeout to prevent infinite loading
+    const loadingTimeout = setTimeout(() => {
+      if (!cancelled) {
+        console.warn('[Auth] Profile load timeout - setting loading to false');
+        setLoading(false);
       }
+    }, 10000);
+    
+    const unsub = onSnapshot(ref, (snap) => {
+      if (cancelled) return;
+      
+      clearTimeout(loadingTimeout);
+      setProfileError(null);
+      if (!snap.exists()) {
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      setProfile({ id: snap.id, ...snap.data() });
+      setLoading(false);
+    }, (error) => {
+      if (cancelled) return;
+      
+      clearTimeout(loadingTimeout);
+      console.error('[Auth] Failed to load user profile:', error);
+      // Don't set profileError for permission errors during initial load
+      // This allows the app to continue even if profile isn't immediately available
+      if (error.code !== 'permission-denied') {
+        setProfileError(error);
+      }
+      setProfile(null);
       setLoading(false);
     });
-    return unsub;
+
+    return () => {
+      cancelled = true;
+      clearTimeout(loadingTimeout);
+      unsub();
+    };
   }, [user]);
 
   // Keep lastActive fresh for presence/online indicators
   useEffect(() => {
-    if (!user) return;
+    if (!user || !profile) return undefined;
+
     const ref = doc(db, 'users', user.uid);
+    let quotaExceeded = false;
+    let backoffTime = 120000; // Start at 2 minutes
+    const MAX_BACKOFF = 600000; // Max 10 minutes
+    
     const tick = async () => {
+      if (quotaExceeded) {
+        // Skip update if we're in backoff mode
+        return;
+      }
+      
       try {
         await updateDoc(ref, { lastActive: serverTimestamp() });
-      } catch (_) {}
+        // Reset backoff on success
+        backoffTime = 120000;
+        quotaExceeded = false;
+      } catch (error) {
+        if (error?.code === 'resource-exhausted') {
+          // Quota exceeded - enter backoff mode
+          quotaExceeded = true;
+          console.warn('[Auth] Quota exceeded, pausing lastActive updates');
+          
+          // Retry after backoff period
+          setTimeout(() => {
+            quotaExceeded = false;
+            backoffTime = Math.min(backoffTime * 2, MAX_BACKOFF);
+          }, backoffTime);
+        } else if (error?.code !== 'permission-denied') {
+          console.warn('[Auth] Failed to update lastActive:', error);
+        }
+      }
     };
+
     tick();
-    const id = setInterval(tick, 120000);
+    const id = setInterval(tick, 120000); // Update every 2 minutes
     return () => clearInterval(id);
-  }, [user]);
+  }, [user, profile]);
 
   // Email / Password signup
   const signupWithEmail = async (email, password, displayName) => {
@@ -74,7 +140,6 @@ export function AuthProvider({ children }) {
       year: '',
       section: '',
       registerNumber: '',
-      encryptedGeminiKey: '',
       approvalStatus: 'pending',
       fcmToken: '',
       profilePhotoURL: '',
@@ -86,22 +151,28 @@ export function AuthProvider({ children }) {
   };
 
   const loginWithEmail = async (email, password) => {
-    const cred = await signInWithEmailAndPassword(auth, email, password);
-    const profileSnap = await getDoc(doc(db, 'users', cred.user.uid));
-    const prefs = profileSnap.exists() ? (profileSnap.data().preferences || {}) : {};
-    if (prefs.twoFactorEnabled === true && !cred.user.phoneNumber) {
-      await signOut(auth);
-      throw new Error('2FA is enabled. Use phone OTP login.');
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const profileSnap = await getDoc(doc(db, 'users', cred.user.uid));
+      const prefs = profileSnap.exists() ? (profileSnap.data().preferences || {}) : {};
+      if (prefs.twoFactorEnabled === true && !cred.user.phoneNumber) {
+        await signOut(auth);
+        throw new Error('2FA is enabled. Use phone OTP login.');
+      }
+      return cred;
+    } catch (error) {
+      console.error('[Auth] Login error:', error);
+      throw error;
     }
-    return cred;
   };
 
   const logout = async () => {
     if (user) {
-      try {
-        await updateDoc(doc(db, 'users', user.uid), { lastActive: serverTimestamp() });
-      } catch (_) {}
+      // Make Firestore update non-blocking - don't wait for it
+      updateDoc(doc(db, 'users', user.uid), { lastActive: serverTimestamp() })
+        .catch(() => {}); // Silently ignore errors
     }
+    // Immediately sign out without waiting
     return signOut(auth);
   };
 
@@ -132,7 +203,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, profile, loading,
+      user, profile, loading, profileError,
       signupWithEmail, loginWithEmail, logout, resetPassword,
       requestPhoneOtp, verifyPhoneOtp,
       isApproved, isPending, role, isTeacher, isHod, isPrincipal,
@@ -169,5 +240,6 @@ function defaultPreferences() {
     attendanceWarningThreshold: 75,
     studyGptPersonality: 'friendly',
     showAchievementsOnDashboard: true,
+    twoFactorEnabled: false,
   };
 }
